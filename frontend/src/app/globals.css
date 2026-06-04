@@ -69,3 +69,21 @@ input:focus {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 9999px;
 }
+
+/* QR Scanner video aspect-fit override to match premium native camera viewports */
+#qr-reader-target {
+  width: 100% !important;
+  height: 100% !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+#qr-reader-target div,
+#qr-reader-target video,
+#qr-reader-target canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 40px !important;
+  border: none !important;
+}

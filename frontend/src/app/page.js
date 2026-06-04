@@ -51,6 +51,7 @@ export default function Home() {
   const [receipt, setReceipt] = useState(null);
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   const [copiedTx, setCopiedTx] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
 
   const handleCopyTx = (txId) => {
     if (!txId) return;
@@ -437,10 +438,16 @@ export default function Home() {
   }, [screen, activeSession]);
 
   // Clean shutdown of camera when leaving home screen
+  // Automatically manage the scanner life cycle: start on home, and stop when leaving
   useEffect(() => {
-    if (screen !== "home") {
+    if (screen === "home") {
+      startScanner();
+    } else {
       stopScanner();
     }
+    return () => {
+      stopScanner();
+    };
   }, [screen]);
 
   // Instantiates the camera scanner safely on mount or return to home
@@ -451,7 +458,8 @@ export default function Home() {
       const { Html5Qrcode } = await import("html5-qrcode");
       scannerInstance.current = new Html5Qrcode("qr-reader-target");
       
-      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+      // Omit qrbox to scan the full camera frame, making scan detection instant and matching GPay/native feel
+      const config = { fps: 15 };
       
       await scannerInstance.current.start(
         { facingMode: "environment" },
@@ -464,12 +472,15 @@ export default function Home() {
           // Suppress noise logs
         }
       );
+      setCameraActive(true);
     } catch (err) {
       console.error("Camera scanner error:", err);
+      setCameraActive(false);
     }
   };
 
   const stopScanner = async () => {
+    setCameraActive(false);
     if (scannerInstance.current) {
       try {
         if (scannerInstance.current.isScanning) {
@@ -507,8 +518,8 @@ export default function Home() {
       setScreen("connector");
     } catch (err) {
       setErrorErrorMsg(err.message || "Could not connect to charger.");
-      // restart scanner if fails on mobile
-      if (isMobileDevice) startScanner();
+      // restart scanner if fails
+      startScanner();
     } finally {
       setLoading(false);
     }
@@ -666,53 +677,54 @@ export default function Home() {
             </p>
           </div>
 
-          {/* Camera View (Mobile Only Default) */}
-          {isMobileDevice ? (
-            <div className="w-full flex flex-col items-center">
-              <div className="w-full aspect-square relative rounded-[40px] overflow-hidden border border-white/10 shadow-2xl glass-premium mb-4 flex items-center justify-center">
-                <div id="qr-reader-target" className="absolute inset-0 w-full h-full opacity-90" />
-                
-                {/* Simulated scanner overlay */}
-                <div className="absolute inset-0 border-[3px] border-apple-accent/40 rounded-[40px] pointer-events-none flex flex-col justify-between p-12">
-                  <div className="flex justify-between">
-                    <span className="h-8 w-8 border-t-[4px] border-l-[4px] border-apple-accent rounded-tl-xl" />
-                    <span className="h-8 w-8 border-t-[4px] border-r-[4px] border-apple-accent rounded-tr-xl" />
-                  </div>
-                  {/* Laser line effect */}
-                  <div className="h-[2px] w-full bg-apple-accent shadow-[0_0_15px_#2f80ed] animate-pulse" />
-                  <div className="flex justify-between">
-                    <span className="h-8 w-8 border-b-[4px] border-l-[4px] border-apple-accent rounded-bl-xl" />
-                    <span className="h-8 w-8 border-b-[4px] border-r-[4px] border-apple-accent rounded-br-xl" />
-                  </div>
+          {/* Universal Camera Scanner View */}
+          <div className="w-full flex flex-col items-center">
+            <div className="w-full aspect-square relative rounded-[40px] overflow-hidden border border-white/10 shadow-2xl glass-premium mb-4 flex items-center justify-center">
+              {/* Camera feed target */}
+              <div id="qr-reader-target" className="absolute inset-0 w-full h-full opacity-90" />
+              
+              {/* Simulated scanner overlay (corners & scanner line) */}
+              <div className="absolute inset-0 border-[3px] border-apple-accent/40 rounded-[40px] pointer-events-none flex flex-col justify-between p-12 z-20">
+                <div className="flex justify-between">
+                  <span className="h-8 w-8 border-t-[4px] border-l-[4px] border-apple-accent rounded-tl-xl" />
+                  <span className="h-8 w-8 border-t-[4px] border-r-[4px] border-apple-accent rounded-tr-xl" />
                 </div>
+                {/* Laser line effect */}
+                <div className="h-[2px] w-full bg-apple-accent shadow-[0_0_15px_#2f80ed] animate-pulse" />
+                <div className="flex justify-between">
+                  <span className="h-8 w-8 border-b-[4px] border-l-[4px] border-apple-accent rounded-bl-xl" />
+                  <span className="h-8 w-8 border-b-[4px] border-r-[4px] border-apple-accent rounded-br-xl" />
+                </div>
+              </div>
 
-                {/* Laser animation inside */}
-                <div className="text-center z-10 p-6 flex flex-col items-center text-white/50">
+              {/* Bouncing Placeholder Camera Icon & Instructions (Shown ONLY when camera stream is loading/inactive) */}
+              {!cameraActive && (
+                <div className="text-center z-10 p-6 flex flex-col items-center text-white/50 animate-fadeIn">
                   <Camera className="h-10 w-10 mb-2 animate-bounce text-apple-accent" />
-                  <span className="text-xs tracking-wider uppercase font-medium">Align QR code inside box</span>
+                  <span className="text-xs tracking-wider uppercase font-medium">Initializing camera stream...</span>
+                  <p className="text-[11px] text-apple-silver/60 mt-1 max-w-[200px] leading-relaxed">
+                    Please grant camera permissions when prompted to start scanning instantly.
+                  </p>
                 </div>
-              </div>
-              <button 
-                onClick={startScanner}
-                className="text-xs font-semibold text-apple-accent flex items-center glass py-2 px-4 rounded-full mt-2 hover:bg-white/5 transition"
-              >
-                <RefreshCw className="h-3 w-3 mr-1.5" /> Initialize Camera Scanner
-              </button>
+              )}
+
+              {/* Sleek overlay badge shown when the camera is actively scanning */}
+              {cameraActive && (
+                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-black/75 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/10 z-30 flex items-center space-x-2 text-white/95 text-xs font-semibold tracking-wide shadow-2xl animate-fadeIn">
+                  <span className="h-2 w-2 rounded-full bg-apple-accent animate-ping" />
+                  <span>Align QR code to scan</span>
+                </div>
+              )}
             </div>
-          ) : (
-            // Desktop fallback view
-            <div className="w-full py-8 px-6 glass rounded-[32px] flex flex-col items-center justify-center text-center space-y-4 mb-4">
-              <div className="h-16 w-16 bg-apple-accent/10 border border-apple-accent/20 rounded-full flex items-center justify-center text-apple-accent mb-2 shadow-inner">
-                <Smartphone className="h-8 w-8" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="font-semibold text-lg text-white">Mobile-First Experience</h3>
-                <p className="text-xs text-apple-silver px-4 font-light">
-                  upiCHARGE is optimized for mobile EV users. Use your phone to scan, or type the ID manually below to test.
-                </p>
-              </div>
-            </div>
-          )}
+            
+            {/* Quick manual re-initialize action just in case camera fails or permission is denied */}
+            <button 
+              onClick={startScanner}
+              className="text-xs font-semibold text-apple-accent flex items-center glass py-2.5 px-5 rounded-full mt-2 hover:bg-white/5 transition active:scale-95 shadow-md"
+            >
+              <RefreshCw className="h-3 w-3 mr-1.5" /> Re-initialize Scanner
+            </button>
+          </div>
 
           {/* Manual Charger ID Input fallback */}
           <div className="w-full glass rounded-3xl p-6 space-y-4">
