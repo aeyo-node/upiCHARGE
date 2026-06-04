@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #000000;
+  color: #ffffff;
+}
+
+/* Glassmorphism custom components */
+.glass {
+  background: rgba(28, 28, 30, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-premium {
+  background: rgba(10, 10, 12, 0.8);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.glass-light {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Custom interactive inputs resembling iOS */
+input {
+  outline: none;
+  transition: all 0.2s ease-in-out;
+}
+
+input:focus {
+  border-color: rgba(47, 128, 237, 0.5);
+  box-shadow: 0 0 0 4px rgba(47, 128, 237, 0.15);
+}
+
+/* Animated glow rings for the active charger dashboard */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(52, 199, 89, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(52, 199, 89, 0.6);
+  }
+}
+
+.glow-emerald {
+  animation: pulse-glow 2.5s infinite;
+}
+
+/* Hide standard HTML scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+}

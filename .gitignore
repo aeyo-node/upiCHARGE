@@ -1,0 +1,29 @@
+# Python / Backend ignores
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+*.log
+diagnostics_output.json
+specific_tx.json
+
+# Node / Next.js / Frontend ignores
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+.npm/
+
+# OS / Miscellaneous ignores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp

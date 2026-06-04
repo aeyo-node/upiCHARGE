@@ -1,0 +1,58 @@
+{
+  "chargerName": "test device",
+  "identity": "185599798823820",
+  "chargerId": "654321",
+  "locationId": 1710398722115,
+  "chargePointConnectionProtocol": "MQTT",
+  "stationType": "AC",
+  "maintenanceStatus": "no",
+  "isFree": null,
+  "featureDetails": [
+    {
+      "name": "QR Code",
+      "description": "This charger can authenticate through QR code method"
+    }
+  ],
+  "oem": {
+    "oemName": "Delta"
+  },
+  "device": {
+    "deviceName": "25KW DC"
+  },
+  "available": true,
+  "evses": [
+    {
+      "status": "Active",
+      "connectorStatus": "Available",
+      "connectorErrCode": "1000",
+      "connectorId": 1,
+      "physicalReference": "aa",
+      "maxOutputPower": 30,
+      "connectors": {
+        "name": "Bharat AC",
+        "powerType": "AC_1_PHASE",
+        "maxVoltage": 240,
+        "maxAmperage": 16,
+        "maxElectricPower": 3300
+      },
+      "newTariff": {
+        "connectorId": 1,
+        "tariff": {
+          "deductiveType": "OCPI Tariff 30",
+          "baseDeductiveAmount": 0.0001,
+          "extraDeductiveAmount": 30,
+          "vat": 18,
+          "isTimeBasedTariff": false
+        }
+      }
+    }
+  ],
+  "tariff": [
+    {
+      "deductiveType": "AC Tariff",
+      "baseDeductiveAmount": 9,
+      "extraDeductiveAmount": 0,
+      "vat": 18
+    }
+  ]
+}
