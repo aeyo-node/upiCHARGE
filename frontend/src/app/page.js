@@ -27,10 +27,21 @@ import {
   ArrowDownCircle
 } from "lucide-react";
 
-// Determine the API base URL dynamically (default to local FastAPI server)
-const API_BASE = "http://localhost:8000";
+// API base is dynamically set inside the Home component state
 
 export default function Home() {
+  const [apiBase, setApiBase] = useState("http://localhost:8000");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+        setApiBase("http://localhost:8000");
+      } else {
+        setApiBase(window.location.origin);
+      }
+    }
+  }, []);
+
   // State management for screen transition:
   // 'home' | 'connector' | 'payment' | 'charging' | 'receipt' | 'support' | 'map'
   const [screen, setScreen] = useState("home");
@@ -400,7 +411,7 @@ export default function Home() {
     if (screen === "charging" && activeSession) {
       const pollStatus = async () => {
         try {
-          const res = await fetch(`${API_BASE}/api/charging/status/${activeSession.charger_id}`);
+          const res = await fetch(`${apiBase}/api/charging/status/${activeSession.charger_id}`);
           if (!res.ok) return;
           const data = await res.json();
           
@@ -500,7 +511,7 @@ export default function Home() {
     stopScanner();
 
     try {
-      const res = await fetch(`${API_BASE}/api/charging/verify-station/${encodeURIComponent(inputCode || qrInput)}`);
+      const res = await fetch(`${apiBase}/api/charging/verify-station/${encodeURIComponent(inputCode || qrInput)}`);
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.detail || "Charger verification failed.");
@@ -544,7 +555,7 @@ export default function Home() {
 
     try {
       // POST to start charging endpoint (direct physical start bypass)
-      const res = await fetch(`${API_BASE}/api/charging/start`, {
+      const res = await fetch(`${apiBase}/api/charging/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -586,7 +597,7 @@ export default function Home() {
   const handleStopCharging = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/charging/stop`, {
+      const res = await fetch(`${apiBase}/api/charging/stop`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
