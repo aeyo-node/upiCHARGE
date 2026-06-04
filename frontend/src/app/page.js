@@ -376,6 +376,7 @@ export default function Home() {
   const scannerRef = useRef(null);
   const scannerInstance = useRef(null);
   const inactivePollsRef = useRef(0);
+  const verifyingRef = useRef(false);
 
   // Detect mobile viewport on mount
   useEffect(() => {
@@ -452,6 +453,7 @@ export default function Home() {
   // Automatically manage the scanner life cycle: start on home, and stop when leaving
   useEffect(() => {
     if (screen === "home") {
+      verifyingRef.current = false; // Reset lock whenever entering home screen!
       startScanner();
     } else {
       stopScanner();
@@ -475,9 +477,9 @@ export default function Home() {
       await scannerInstance.current.start(
         { facingMode: "environment" },
         config,
-        (decodedText) => {
+        async (decodedText) => {
           // Success! Verify station
-          handleVerify(decodedText);
+          await handleVerify(decodedText);
         },
         () => {
           // Suppress noise logs
@@ -506,9 +508,15 @@ export default function Home() {
 
   // 1. Verify Charger
   const handleVerify = async (inputCode) => {
+    if (verifyingRef.current) return;
+    verifyingRef.current = true;
+    
     setErrorErrorMsg("");
     setLoading(true);
-    stopScanner();
+    
+    // Crucial: await stopping the scanner completely before sending any network request
+    // This stops the camera frame cycle and prevents parallel/re-entrant verify requests
+    await stopScanner();
 
     try {
       const res = await fetch(`${apiBase}/api/charging/verify-station/${encodeURIComponent(inputCode || qrInput)}`);
@@ -529,8 +537,10 @@ export default function Home() {
       setScreen("connector");
     } catch (err) {
       setErrorErrorMsg(err.message || "Could not connect to charger.");
-      // restart scanner if fails
-      startScanner();
+      // Unlock verification since we failed, so user can try scanning again
+      verifyingRef.current = false;
+      // Restart scanner if verify fails
+      await startScanner();
     } finally {
       setLoading(false);
     }
@@ -640,6 +650,7 @@ export default function Home() {
     setReceipt(null);
     setCustomAmount("");
     setErrorErrorMsg("");
+    verifyingRef.current = false;
   };
 
   // Helper formatting for durations
