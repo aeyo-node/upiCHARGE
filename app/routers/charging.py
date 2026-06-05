@@ -118,8 +118,6 @@ def get_nearby_chargers(lat: float, lon: float, radius: float = 30.0):
     Uses MongoDB aggregation with a local JSON-based fallback for offline/local development.
     """
     import math
-    from pymongo import MongoClient
-    from bson import ObjectId
     
     # 1. Define Haversine formula
     def haversine_distance(lat1, lon1, lat2, lon2):
@@ -138,6 +136,9 @@ def get_nearby_chargers(lat: float, lon: float, radius: float = 30.0):
     MONGO_URI = os.getenv("MONGO_URI")
     if MONGO_URI:
         try:
+            from pymongo import MongoClient
+            from bson import ObjectId
+            
             # Short timeout to avoid stalling on DNS/SRV errors in local dev
             client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
             db = client["console"]
