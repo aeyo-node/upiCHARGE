@@ -127,6 +127,7 @@ def get_nearby_chargers(lat: float, lon: float, radius: float = 30.0):
         dlat = math.radians(lat2 - lat1)
         dlon = math.radians(lon2 - lon1)
         a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+        a = max(0.0, min(1.0, a)) # Clip to [0.0, 1.0] to prevent math domain error due to float rounding inaccuracies
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         return R * c
 

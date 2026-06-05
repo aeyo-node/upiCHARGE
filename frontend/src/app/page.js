@@ -1821,29 +1821,49 @@ export default function Home() {
               {nearbyChargers.length === 0 && !isMapLoading ? (
                 <p className="text-xs text-[#86868b] text-center py-4 font-light">No chargers found within 30 km radius.</p>
               ) : (
-                nearbyChargers.map(cp => (
-                  <div key={cp.identity} className="glass-light p-4 rounded-2xl flex items-start justify-between border-black/5 transition hover:bg-black/5">
-                    <div className="space-y-0.5">
-                      <span className="text-xs font-bold text-[#1d1d1f]">{cp.chargerName || cp.identity}</span>
-                      <p className="text-[11px] text-[#86868b] truncate max-w-[180px]">{cp.locationName || 'Unknown Location'}</p>
-                      <div className="flex items-center space-x-1.5 mt-1">
+                nearbyChargers.map(cp => {
+                const coords = cp.geoLocation?.coordinates;
+                const hasCoords = coords && coords.length === 2;
+                return (
+                  <div key={cp.identity} className="glass-light p-4 rounded-2xl flex flex-col space-y-3 border border-black/5 transition hover:bg-black/5">
+                    <div className="flex justify-between items-start">
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-bold text-[#1d1d1f]">{cp.chargerName || cp.identity}</span>
+                        <p className="text-[11px] text-[#86868b] truncate max-w-[200px]">{cp.locationName || 'Unknown Location'}</p>
+                      </div>
+                      <div className="flex items-center space-x-1.5">
                         <span className="inline-block w-1.5 h-1.5 rounded-full bg-apple-emerald animate-pulse"></span>
                         <span className="text-[10px] text-apple-emerald font-bold">
                           {cp.distance ? `${cp.distance.toFixed(1)} km away` : 'Nearby'}
                         </span>
                       </div>
                     </div>
-                    <button 
-                      onClick={() => {
-                        setQrInput(cp.identity);
-                        handleVerify(cp.identity);
-                      }}
-                      className="bg-[#007aff] hover:bg-opacity-90 text-white font-semibold py-1.5 px-3 rounded-full text-xs shadow-md select-none cursor-pointer"
-                    >
-                      Select
-                    </button>
+                    
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => {
+                          setQrInput(cp.identity);
+                          handleVerify(cp.identity);
+                        }}
+                        className="flex-1 bg-[#007aff] hover:bg-opacity-95 text-white font-bold py-2 rounded-xl text-[11px] shadow-sm select-none cursor-pointer text-center"
+                      >
+                        Select Charger
+                      </button>
+                      
+                      {hasCoords && (
+                        <a 
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${coords[1]},${coords[0]}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 bg-black/5 hover:bg-black/10 text-[#1d1d1f] font-semibold py-2 rounded-xl text-[11px] shadow-sm select-none text-center border border-black/5 transition flex items-center justify-center space-x-1 no-underline"
+                        >
+                          <span>Get Directions</span>
+                        </a>
+                      )}
+                    </div>
                   </div>
-                ))
+                );
+              })
               )}
             </div>
           </div>
