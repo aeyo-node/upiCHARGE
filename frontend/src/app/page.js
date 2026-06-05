@@ -554,29 +554,34 @@ export default function Home() {
     setErrorErrorMsg("");
     setLoading(true);
     
-    // Crucial: await stopping the scanner completely before sending any network request
-    // This stops the camera frame cycle and prevents parallel/re-entrant verify requests
+    console.log("[handleVerify] Raw input:", inputCode);
+    
+    // Stop scanner to prevent parallel scans
     await stopScanner();
 
     let cleanCode = inputCode || qrInput;
     if (cleanCode) {
       cleanCode = cleanCode.trim();
-      if (cleanCode.includes("/")) {
-        const parts = cleanCode.split("/").filter(Boolean);
-        if (parts.length > 0) {
-          cleanCode = parts[parts.length - 1];
-        }
-      }
     }
 
     try {
-      const res = await fetch(`${apiBase}/api/charging/verify-station/${encodeURIComponent(cleanCode)}`);
+      const verifyUrl = `${apiBase}/api/charging/verify-station/${encodeURIComponent(cleanCode)}`;
+      console.log("[handleVerify] Fetching:", verifyUrl);
+      
+      const res = await fetch(verifyUrl);
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.detail || "Charger verification failed.");
+        let errorText = "Charger verification failed.";
+        try {
+          const errData = await res.json();
+          errorText = errData.detail || errorText;
+        } catch (e) {
+          // Fallback if not JSON
+        }
+        throw new Error(errorText);
       }
 
       const data = await res.json();
+      console.log("[handleVerify] Station data received:", data);
       setStationDetails(data);
       setChargerId(data.charger_id);
       
@@ -587,7 +592,14 @@ export default function Home() {
       
       setScreen("connector");
     } catch (err) {
-      setErrorErrorMsg(err.message || "Could not connect to charger.");
+      console.error("[handleVerify] Error details:", err);
+      // Detailed error message for the user to help debug network/CORS issues
+      let msg = err.message || "Could not connect to charger.";
+      if (msg === "Failed to fetch") {
+        msg = "Failed to fetch: Connection error between browser and server. Check your network or server URL.";
+      }
+      setErrorErrorMsg(msg);
+      
       // Unlock verification since we failed, so user can try scanning again
       verifyingRef.current = false;
       // Restart scanner if verify fails

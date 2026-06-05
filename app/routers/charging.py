@@ -77,21 +77,34 @@ def clear_active_payment(charger_id: str):
 
 def parse_qr_code(qr_data: str) -> str:
     """
-    Parses scanned QR data (either raw like 'CM-CMOD0135-VLEM', a URL, or already clean id).
+    Parses scanned QR data (either raw like 'CM-S01664-0IJGY975TE', a URL, or already clean id).
     """
+    original_input = qr_data
     qr_data = qr_data.strip()
+    
+    # 1. Strip query strings and fragments
     if "?" in qr_data:
         qr_data = qr_data.split("?")[0]
+    if "#" in qr_data:
+        qr_data = qr_data.split("#")[0]
         
+    # 2. Extract last part of a URL or path
     if "/" in qr_data:
         parts = [p for p in qr_data.split("/") if p]
         if parts:
             qr_data = parts[-1]
             
+    # 3. Handle chargeMOD specific "CM-" prefix format
+    # Example: CM-S01664-0IJGY975TE
     if qr_data.startswith("CM-"):
-        parts = qr_data.split("-")
-        if len(parts) >= 2:
-            return parts[1]
+        # If it's a 3-part CM-A-B string, we try to use the full string first
+        # as the resolve_charger function is flexible.
+        # But if that fails, the middle part is usually the station key.
+        # For now, we return the full string and let resolve_charger handle it, 
+        # or if it has parts, we just pass it through.
+        pass
+
+    print(f"[QR Parser] Input: '{original_input}' -> Parsed: '{qr_data}'")
     return qr_data
 
 
@@ -107,10 +120,17 @@ def verify_station(qr_code: str):
     
     # 1. Resolve charger
     resolved = resolve_charger(charger_id)
+    if resolved.get("status") == "multiple":
+        # If multiple, just pick the first one to keep it frictionless as per user request,
+        # or we could return a specific error. Picking first for now.
+        if resolved.get("options"):
+            charger_id = resolved["options"][0]["identity"]
+            resolved = resolve_charger(charger_id)
+            
     if resolved.get("status") != "resolved":
         raise HTTPException(
             status_code=404, 
-            detail=resolved.get("message", f"Charger {charger_id} not found.")
+            detail=resolved.get("message", f"Charger '{charger_id}' could not be resolved in the system.")
         )
     
     identity = resolved["charger"]["identity"]
