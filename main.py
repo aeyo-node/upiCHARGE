@@ -106,5 +106,5 @@ def read_root():
 
 if __name__ == "__main__":
     print(f"Starting UPICharge backend in {PAYMENT_MODE} payment mode...")
-    uvicorn.run("main:app", host=HOST, port=PORT, reload=True)
+    uvicorn.run("main:app", host=HOST, port=PORT, reload=False)
 
