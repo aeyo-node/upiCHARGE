@@ -34,7 +34,52 @@ import {
 
 export default function Home() {
   const apiBase = ""; // Force relative routing everywhere to use the Next.js reverse-proxy.
+
+  // State management for screen transition:
+  // 'home' | 'connector' | 'payment' | 'charging' | 'receipt' | 'support' | 'map'
+  const [screen, setScreen] = useState("home");
+  
+  // App context states
+  const [qrInput, setQrInput] = useState("");
+  const [chargerId, setChargerId] = useState("");
+  const [stationDetails, setStationDetails] = useState(null);
+  const [selectedConnector, setSelectedConnector] = useState(null);
+  const [prepaidAmount, setPrepaidAmount] = useState(200);
+  const [customAmount, setCustomAmount] = useState("");
+  const [customerMobile, setCustomerMobile] = useState("+918086477654");
   const [isDummyMode, setIsDummyMode] = useState(true);
+  
+  // Charging state feedback
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorErrorMsg] = useState("");
+  const [activeSession, setActiveSession] = useState(null);
+  const [receipt, setReceipt] = useState(null);
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
+  const [copiedTx, setCopiedTx] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [lastScanned, setLastScanned] = useState("");
+
+  // Support Chat States
+  const [chatUserId, setChatUserId] = useState("");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isChatSending, setIsChatSending] = useState(false);
+
+  // Charger Locator Map States
+  const [nearbyChargers, setNearbyChargers] = useState([]);
+  const [isMapLoading, setIsMapLoading] = useState(false);
+  const [mapError, setMapError] = useState("");
+  const [userLat, setUserLat] = useState(null);
+  const [userLon, setUserLon] = useState(null);
+
+  // Refs for Chat and Map DOM containers
+  const chatEndRef = useRef(null);
+  const mapRef = useRef(null);
+  const leafletMapInstance = useRef(null);
+  const scannerRef = useRef(null);
+  const scannerInstance = useRef(null);
+  const inactivePollsRef = useRef(0);
+  const verifyingRef = useRef(false);
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -304,56 +349,345 @@ export default function Home() {
       }
     };
   }, [screen, nearbyChargers, isMapLoading]);
+  // Logic Functions
+  function triggerBrowserNotification(title, body) {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "granted") {
+        try {
+          new Notification(title, { body });
+        } catch (e) {
+          console.error("Failed to trigger Notification:", e);
+        }
+      }
+    }
+  }
 
-  // State management for screen transition:
-  // 'home' | 'connector' | 'payment' | 'charging' | 'receipt' | 'support' | 'map'
-  const [screen, setScreen] = useState("home");
-  
-  // App context states
-  const [qrInput, setQrInput] = useState("");
-  const [chargerId, setChargerId] = useState("");
-  const [stationDetails, setStationDetails] = useState(null);
-  const [selectedConnector, setSelectedConnector] = useState(null);
-  const [prepaidAmount, setPrepaidAmount] = useState(200);
-  const [customAmount, setCustomAmount] = useState("");
-  const [customerMobile, setCustomerMobile] = useState("+918086477654");
-  
-  // Charging state feedback
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorErrorMsg] = useState("");
-  const [activeSession, setActiveSession] = useState(null);
-  const [receipt, setReceipt] = useState(null);
-  const [isMobileDevice, setIsMobileDevice] = useState(false);
-  const [copiedTx, setCopiedTx] = useState(false);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [lastScanned, setLastScanned] = useState("");
-
-  // Support Chat States
-  const [chatUserId, setChatUserId] = useState("");
-  const [chatMessages, setChatMessages] = useState([]);
-  const [chatInput, setChatInput] = useState("");
-  const [isChatSending, setIsChatSending] = useState(false);
-
-  // Charger Locator Map States
-  const [nearbyChargers, setNearbyChargers] = useState([]);
-  const [isMapLoading, setIsMapLoading] = useState(false);
-  const [mapError, setMapError] = useState("");
-  const [userLat, setUserLat] = useState(null);
-  const [userLon, setUserLon] = useState(null);
-
-  // Refs for Chat and Map DOM containers
-  const chatEndRef = useRef(null);
-  const mapRef = useRef(null);
-  const leafletMapInstance = useRef(null);
-
-  const handleCopyTx = (txId) => {
+  function handleCopyTx(txId) {
     if (!txId) return;
     navigator.clipboard.writeText(txId);
     setCopiedTx(true);
     setTimeout(() => setCopiedTx(false), 2000);
-  };
+  }
 
-  const handleDownloadInvoice = (receiptData) => {
+  function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  }
+
+  async function handleVerify(inputCode) {
+    if (verifyingRef.current) return;
+    verifyingRef.current = true;
+    
+    setErrorErrorMsg("");
+    setLoading(true);
+    
+    console.log("[handleVerify] Raw input:", inputCode);
+    
+    await stopScanner();
+
+    let cleanCode = inputCode || qrInput;
+    if (cleanCode) {
+      cleanCode = cleanCode.trim();
+      setLastScanned(cleanCode);
+    }
+
+    try {
+      const verifyUrl = `${apiBase}/api/charging/verify-station/${encodeURIComponent(cleanCode)}`;
+      console.log("[handleVerify] Fetching:", verifyUrl);
+      
+      const res = await fetch(verifyUrl);
+      if (!res.ok) {
+        let errorText = "Charger verification failed.";
+        try {
+          const errData = await res.json();
+          errorText = errData.detail || errorText;
+        } catch (e) {}
+        throw new Error(errorText);
+      }
+
+      const data = await res.json();
+      console.log("[handleVerify] Station data received:", data);
+      setStationDetails(data);
+      setChargerId(data.charger_id);
+      
+      if (data.connectors && data.connectors.length > 0) {
+        setSelectedConnector(data.connectors[0]);
+      }
+      
+      setScreen("connector");
+    } catch (err) {
+      console.error("[handleVerify] Error details:", err);
+      let msg = err.message || "Could not connect to charger.";
+      if (msg === "Failed to fetch") {
+        msg = "Failed to fetch: Connection error between browser and server.";
+      }
+      setErrorErrorMsg(msg);
+      verifyingRef.current = false;
+      await startScanner();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function startScanner() {
+    if (typeof window === "undefined") return;
+    if (scannerInstance.current) {
+      await stopScanner();
+    }
+    
+    try {
+      const { Html5Qrcode } = await import("html5-qrcode");
+      const scanner = new Html5Qrcode("qr-reader-target");
+      scannerInstance.current = scanner;
+      
+      const config = { fps: 10 };
+      
+      try {
+        await scanner.start(
+          { facingMode: "environment" },
+          config,
+          async (decodedText) => {
+            await handleVerify(decodedText);
+          },
+          () => {}
+        );
+        setCameraActive(true);
+      } catch (innerErr) {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          let cameraId = devices[0].id;
+          const backCam = devices.find(d => 
+            d.label.toLowerCase().includes("back") || 
+            d.label.toLowerCase().includes("rear") ||
+            d.label.toLowerCase().includes("environment")
+          );
+          if (backCam) cameraId = backCam.id;
+          
+          await scanner.start(
+            cameraId,
+            config,
+            async (decodedText) => {
+              await handleVerify(decodedText);
+            },
+            () => {}
+          );
+          setCameraActive(true);
+        } else {
+          throw new Error("No cameras found.");
+        }
+      }
+    } catch (err) {
+      console.error("[Scanner] Start failed:", err);
+      setCameraActive(false);
+      if (err.toString().includes("NotAllowedError") || err.toString().includes("Permission")) {
+        setErrorErrorMsg("Camera permission denied.");
+      } else {
+        setErrorErrorMsg("Camera error: " + (err.message || "Unknown error"));
+      }
+    }
+  }
+
+  async function stopScanner() {
+    setCameraActive(false);
+    if (scannerInstance.current) {
+      try {
+        if (scannerInstance.current.isScanning) {
+          await scannerInstance.current.stop();
+        }
+      } catch (err) {
+        console.warn("[Scanner] Stop error:", err);
+      }
+      scannerInstance.current = null;
+    }
+  }
+
+  async function handleFileUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setErrorErrorMsg("");
+    setLoading(true);
+    
+    try {
+      await stopScanner();
+      const { Html5Qrcode } = await import("html5-qrcode");
+      const fileScanner = new Html5Qrcode("qr-file-fallback-target");
+      const decodedText = await fileScanner.scanFile(file, false);
+      e.target.value = "";
+      await handleVerify(decodedText);
+    } catch (err) {
+      setErrorErrorMsg("Could not find a valid QR code in that image.");
+      await startScanner();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleStopCharging() {
+    setLoading(true);
+    try {
+      const res = await fetch(`${apiBase}/api/charging/stop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          charger_id: chargerId,
+          customer_mobile: activeSession?.customer_mobile || customerMobile || "9999999999",
+          prepaid_amount: activeSession?.prepaid_amount || 0
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || "Stop API returned error.");
+      }
+
+      const data = await res.json();
+      setReceipt(data.metrics);
+      
+      triggerBrowserNotification(
+        "🔌 Charging Stopped!",
+        `Usage: ${(data.metrics.energy_kwh || 0).toFixed(2)} kWh\nAmount Charged: ₹${(data.metrics.actual_cost || 0).toFixed(2)}`
+      );
+
+      localStorage.removeItem("active_charge_session");
+      setActiveSession(null);
+      setScreen("receipt");
+    } catch (err) {
+      setErrorErrorMsg(err.message || "Remote stop failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleAutoStop() {
+    localStorage.removeItem("active_charge_session");
+    handleStopCharging();
+  }
+
+  function handleReset() {
+    setScreen("home");
+    setQrInput("");
+    setChargerId("");
+    setStationDetails(null);
+    setSelectedConnector(null);
+    setReceipt(null);
+    setCustomAmount("");
+    setErrorErrorMsg("");
+    verifyingRef.current = false;
+  }
+
+  function handleProceedToPayment() {
+    setErrorErrorMsg("");
+    setScreen("payment");
+  }
+
+  async function handleStartCharging() {
+    setLoading(true);
+    setErrorErrorMsg("");
+
+    const finalPrepaid = customAmount ? parseFloat(customAmount) : prepaidAmount;
+    const finalMobile = customerMobile ? customerMobile : "9999999999";
+
+    try {
+      const res = await fetch(`${apiBase}/api/payments/create-order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          charger_id: chargerId,
+          connector_id: selectedConnector.connector_id,
+          customer_mobile: finalMobile,
+          amount: finalPrepaid
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || "Failed to create payment order.");
+      }
+
+      const orderData = await res.json();
+
+      if (orderData.dummy_mode === true) {
+        const startRes = await fetch(`${apiBase}/api/charging/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            charger_id: chargerId,
+            connector_id: selectedConnector.connector_id,
+            customer_mobile: finalMobile,
+            prepaid_amount: finalPrepaid
+          })
+        });
+
+        if (!startRes.ok) {
+          const errData = await startRes.json();
+          throw new Error(errData.detail || "Failed to start charger.");
+        }
+
+        const initialSession = {
+          charger_id: chargerId,
+          connector_id: selectedConnector.connector_id,
+          customer_mobile: finalMobile,
+          prepaid_amount: finalPrepaid,
+          energy_kwh: 0,
+          cost_rs: 0,
+          elapsed_seconds: 0
+        };
+
+        localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
+        setActiveSession(initialSession);
+        setScreen("charging");
+        
+        triggerBrowserNotification("⚡ Charging Started!", `Prepaid Limit: ₹${finalPrepaid}`);
+      } else {
+        if (typeof window === "undefined" || !window.Razorpay) {
+          throw new Error("Razorpay SDK not loaded.");
+        }
+
+        const options = {
+          key: orderData.key,
+          amount: orderData.amount,
+          currency: orderData.currency,
+          name: orderData.name,
+          description: orderData.description,
+          order_id: orderData.order_id,
+          handler: function (response) {
+            const initialSession = {
+              charger_id: chargerId,
+              connector_id: selectedConnector.connector_id,
+              customer_mobile: finalMobile,
+              prepaid_amount: finalPrepaid,
+              energy_kwh: 0,
+              cost_rs: 0,
+              elapsed_seconds: 0
+            };
+            localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
+            setActiveSession(initialSession);
+            setScreen("charging");
+            triggerBrowserNotification("⚡ Charging Started!", `Prepaid Limit: ₹${finalPrepaid}`);
+          },
+          prefill: {
+            contact: finalMobile,
+            email: "aeyo.node@gmail.com",
+            method: 'upi'
+          },
+          theme: { color: "#e07a2c" }
+        };
+
+        const rzp = new window.Razorpay(options);
+        rzp.on("payment.failed", function (response) {
+          setErrorErrorMsg(response.error.description || "Payment failed.");
+        });
+        rzp.open();
+      }
+    } catch (err) {
+      setErrorErrorMsg(err.message || "Checkout failed.");
+      setScreen("connector");
+    } finally {
+      setLoading(false);
+    }
+  function handleDownloadInvoice(receiptData) {
     const invoiceHtml = `
 <!DOCTYPE html>
 <html lang="en">
@@ -534,7 +868,7 @@ export default function Home() {
                 <div>${receiptData.session_date_formatted || "03 Jun 2026"}</div>
             </div>
         </div>
-
+        
         <div style="border-top: 1px solid #f1f2f4; padding-top: 20px; margin-bottom: 20px;">
             <div class="section-title">Charging Session Details</div>
             <div class="grid">
@@ -640,7 +974,7 @@ export default function Home() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `invoice_\${receiptData.transaction_id || 'TXN_93818'}.html`;
+    a.download = `invoice_${receiptData.transaction_id || 'TXN_93818'}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -652,26 +986,7 @@ export default function Home() {
         w.document.write(invoiceHtml);
         w.document.close();
     }
-  };
-
-  // QR scanner references
-  const scannerRef = useRef(null);
-  const scannerInstance = useRef(null);
-  const inactivePollsRef = useRef(0);
-  const verifyingRef = useRef(false);
-
-  // Browser notification trigger
-  const triggerBrowserNotification = (title, body) => {
-    if (typeof window !== "undefined" && "Notification" in window) {
-      if (Notification.permission === "granted") {
-        try {
-          new Notification(title, { body });
-        } catch (e) {
-          console.error("Failed to trigger Notification:", e);
-        }
-      }
-    }
-  };
+  }
 
   // Detect mobile viewport and request notification permission on mount
   useEffect(() => {
@@ -766,426 +1081,6 @@ export default function Home() {
     };
   }, [screen]);
 
-  // Instantiates the camera scanner safely on mount or return to home
-  const startScanner = async () => {
-    if (typeof window === "undefined") return;
-    
-    // If already scanning, stop first to ensure a clean start
-    if (scannerInstance.current) {
-      console.log("[Scanner] Instance exists, stopping first...");
-      await stopScanner();
-    }
-    
-    try {
-      console.log("[Scanner] Starting initialization...");
-      const { Html5Qrcode } = await import("html5-qrcode");
-      const scanner = new Html5Qrcode("qr-reader-target");
-      scannerInstance.current = scanner;
-      
-      // Highly optimized and ultra-reliable config
-      // Omitting qrbox and aspectRatio allows html5-qrcode to scan the entire frame,
-      // eliminating coordinate mismatches and scaling/cropping bugs!
-      const config = { 
-        fps: 10, // Smoother on mobile, reduces CPU / battery drain
-      };
-      
-      try {
-        // Try back camera by default
-        await scanner.start(
-          { facingMode: "environment" },
-          config,
-          async (decodedText) => {
-            console.log("[Scanner] Scanned:", decodedText);
-            await handleVerify(decodedText);
-          },
-          () => {} // Suppress noisy frame analysis failures
-        );
-        console.log("[Scanner] Successfully started with environment camera.");
-        setCameraActive(true);
-      } catch (innerErr) {
-        console.warn("[Scanner] FacingMode start failed, trying getCameras fallback:", innerErr);
-        // Fallback: Query all cameras and pick the first available one!
-        const devices = await Html5Qrcode.getCameras();
-        if (devices && devices.length > 0) {
-          // Look for a camera with "back" or "rear" or "environment" in its label
-          let cameraId = devices[0].id;
-          const backCam = devices.find(d => 
-            d.label.toLowerCase().includes("back") || 
-            d.label.toLowerCase().includes("rear") ||
-            d.label.toLowerCase().includes("environment")
-          );
-          if (backCam) {
-            cameraId = backCam.id;
-            console.log("[Scanner] Fallback chose back camera:", backCam.label);
-          } else {
-            console.log("[Scanner] Fallback chose first camera:", devices[0].label);
-          }
-          
-          await scanner.start(
-            cameraId,
-            config,
-            async (decodedText) => {
-              console.log("[Scanner] Scanned via fallback:", decodedText);
-              await handleVerify(decodedText);
-            },
-            () => {}
-          );
-          console.log("[Scanner] Successfully started with fallback camera ID.");
-          setCameraActive(true);
-        } else {
-          throw new Error("No cameras found on this device.");
-        }
-      }
-    } catch (err) {
-      console.error("[Scanner] Start failed:", err);
-      setCameraActive(false);
-      if (err.toString().includes("NotAllowedError") || err.toString().includes("Permission")) {
-        setErrorErrorMsg("Camera permission denied. Please enable it in browser settings and refresh.");
-      } else {
-        setErrorErrorMsg("Camera error: " + (err.message || "Unknown error"));
-      }
-    }
-  };
-
-  const stopScanner = async () => {
-    console.log("[Scanner] Stopping...");
-    setCameraActive(false);
-    if (scannerInstance.current) {
-      try {
-        if (scannerInstance.current.isScanning) {
-          await scannerInstance.current.stop();
-          console.log("[Scanner] Stopped scanning.");
-        }
-      } catch (err) {
-        console.warn("[Scanner] Stop error (likely already stopped):", err);
-      }
-      scannerInstance.current = null;
-    }
-  };
-
-  // Safe client-side file upload scanning fallback
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    setErrorErrorMsg("");
-    setLoading(true);
-    
-    try {
-      console.log("[Scanner] Scanning uploaded file:", file.name);
-      
-      // Stop the camera first to prevent resources locking
-      await stopScanner();
-      
-      const { Html5Qrcode } = await import("html5-qrcode");
-      const fileScanner = new Html5Qrcode("qr-file-fallback-target");
-      
-      const decodedText = await fileScanner.scanFile(file, false);
-      console.log("[Scanner] File scan success:", decodedText);
-      
-      // Reset input value to allow scan of same file if needed
-      e.target.value = "";
-      
-      await handleVerify(decodedText);
-    } catch (err) {
-      console.error("[Scanner] File scan failed:", err);
-      setErrorErrorMsg("Could not find a valid QR code in that image. Make sure the QR code is clear, well-lit, and fully in frame.");
-      // Restart camera scanner since file scan failed
-      await startScanner();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 1. Verify Charger
-  const handleVerify = async (inputCode) => {
-    if (verifyingRef.current) return;
-    verifyingRef.current = true;
-    
-    setErrorErrorMsg("");
-    setLoading(true);
-    
-    console.log("[handleVerify] Raw input:", inputCode);
-    
-    // Stop scanner to prevent parallel scans
-    await stopScanner();
-
-    let cleanCode = inputCode || qrInput;
-    if (cleanCode) {
-      cleanCode = cleanCode.trim();
-      setLastScanned(cleanCode);
-    }
-
-    try {
-      const verifyUrl = `${apiBase}/api/charging/verify-station/${encodeURIComponent(cleanCode)}`;
-      console.log("[handleVerify] Fetching:", verifyUrl);
-      
-      const res = await fetch(verifyUrl);
-      if (!res.ok) {
-        let errorText = "Charger verification failed.";
-        try {
-          const errData = await res.json();
-          errorText = errData.detail || errorText;
-        } catch (e) {
-          // Fallback if not JSON
-        }
-        throw new Error(errorText);
-      }
-
-      const data = await res.json();
-      console.log("[handleVerify] Station data received:", data);
-      setStationDetails(data);
-      setChargerId(data.charger_id);
-      
-      // Auto-select first connector if available
-      if (data.connectors && data.connectors.length > 0) {
-        setSelectedConnector(data.connectors[0]);
-      }
-      
-      setScreen("connector");
-    } catch (err) {
-      console.error("[handleVerify] Error details:", err);
-      // Detailed error message for the user to help debug network/CORS issues
-      let msg = err.message || "Could not connect to charger.";
-      if (msg === "Failed to fetch") {
-        msg = "Failed to fetch: Connection error between browser and server. Check your network or server URL.";
-      }
-      setErrorErrorMsg(msg);
-      
-      // Unlock verification since we failed, so user can try scanning again
-      verifyingRef.current = false;
-      // Restart scanner if verify fails
-      await startScanner();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 2. Start Payment pre-authorization loop
-  const handleProceedToPayment = () => {
-    setErrorErrorMsg("");
-    setScreen("payment");
-  };
-
-  // 3. Initiate Charging (Simulated Payment -> Start API)
-  const handleStartCharging = async () => {
-    setLoading(true);
-    setErrorErrorMsg("");
-
-    const finalPrepaid = customAmount ? parseFloat(customAmount) : prepaidAmount;
-    const finalMobile = customerMobile ? customerMobile : "9999999999";
-
-    try {
-      // 1. Create a secure prepaid order from payments endpoint
-      const res = await fetch(`${apiBase}/api/payments/create-order`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          charger_id: chargerId,
-          connector_id: selectedConnector.connector_id,
-          customer_mobile: finalMobile,
-          amount: finalPrepaid
-        })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.detail || "Failed to create payment order.");
-      }
-
-      const orderData = await res.json();
-
-      // 2. Decide flow based on payment_mode / dummy_mode
-      if (orderData.dummy_mode === true) {
-        // Bypass Razorpay widget, trigger /api/charging/start directly
-        const startRes = await fetch(`${apiBase}/api/charging/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            charger_id: chargerId,
-            connector_id: selectedConnector.connector_id,
-            customer_mobile: finalMobile,
-            prepaid_amount: finalPrepaid
-          })
-        });
-
-        if (!startRes.ok) {
-          const errData = await startRes.json();
-          throw new Error(errData.detail || "Failed to start charger in simulation.");
-        }
-
-        const initialSession = {
-          charger_id: chargerId,
-          connector_id: selectedConnector.connector_id,
-          customer_mobile: finalMobile,
-          prepaid_amount: finalPrepaid,
-          energy_kwh: 0,
-          cost_rs: 0,
-          elapsed_seconds: 0
-        };
-
-        // Save to localStorage for recovery
-        localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
-        setActiveSession(initialSession);
-        setScreen("charging");
-        
-        // Trigger browser notification
-        triggerBrowserNotification(
-          "⚡ Charging Started!",
-          `Station Name: ${stationDetails?.charger_name || stationDetails?.location_name || "Unknown Station"}\n` +
-          `Charger: ${chargerId}\n` +
-          `Connector: ${selectedConnector?.connector_id || 1}\n` +
-          `Prepaid Limit: ₹${finalPrepaid}`
-        );
-      } else {
-        // Live Razorpay Mode
-        if (typeof window === "undefined" || !window.Razorpay) {
-          throw new Error("Razorpay SDK not loaded. Please try again.");
-        }
-
-        const options = {
-          key: orderData.key,
-          amount: orderData.amount,
-          currency: orderData.currency,
-          name: orderData.name,
-          description: orderData.description,
-          order_id: orderData.order_id,
-          handler: function (response) {
-            // Payment success callback from widget
-            const initialSession = {
-              charger_id: chargerId,
-              connector_id: selectedConnector.connector_id,
-              customer_mobile: finalMobile,
-              prepaid_amount: finalPrepaid,
-              energy_kwh: 0,
-              cost_rs: 0,
-              elapsed_seconds: 0
-            };
-            localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
-            setActiveSession(initialSession);
-            setScreen("charging");
-            
-            // Trigger browser notification
-            triggerBrowserNotification(
-              "⚡ Charging Started!",
-              `Station Name: ${stationDetails?.charger_name || stationDetails?.location_name || "Unknown Station"}\n` +
-              `Charger: ${chargerId}\n` +
-              `Connector: ${selectedConnector?.connector_id || 1}\n` +
-              `Prepaid Limit: ₹${finalPrepaid}`
-            );
-          },
-          prefill: {
-            contact: finalMobile,
-            email: "aeyo.node@gmail.com",
-            method: 'upi'
-          },
-          config: {
-            display: {
-              blocks: {
-                upi: {
-                  name: 'UPI Payments Only',
-                  instruments: [
-                    {
-                      method: 'upi'
-                    }
-                  ]
-                }
-              },
-              sequence: ['block.upi'],
-              preferences: {
-                show_default_blocks: false
-              }
-            }
-          },
-          theme: { color: "#e07a2c" }
-        };
-
-        const rzp = new window.Razorpay(options);
-        
-        rzp.on("payment.failed", function (response) {
-          console.error("Payment failed:", response.error);
-          setErrorErrorMsg(response.error.description || "Payment failed.");
-        });
-
-        rzp.open();
-      }
-    } catch (err) {
-      setErrorErrorMsg(err.message || "Checkout failed.");
-      setScreen("connector");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 4. Remote Stop Charging & Refund Trigger
-  const handleStopCharging = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${apiBase}/api/charging/stop`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          charger_id: chargerId,
-          customer_mobile: activeSession?.customer_mobile || customerMobile || "9999999999",
-          prepaid_amount: activeSession?.prepaid_amount || 0
-        })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.detail || "Stop API returned error.");
-      }
-
-      const data = await res.json();
-      setReceipt(data.metrics);
-      
-      // Trigger browser stop charging notification
-      triggerBrowserNotification(
-        "🔌 Charging Stopped!",
-        `Station Name: ${data.metrics.charger_name || data.metrics.location_name || stationDetails?.charger_name || "Unknown Station"}\n` +
-        `Charger: ${chargerId}\n` +
-        `Connector: ${selectedConnector?.connector_id || data.metrics.connector_id || 1}\n` +
-        `Usage: ${(data.metrics.energy_kwh || 0).toFixed(2)} kWh\n` +
-        `Amount Charged: ₹${(data.metrics.actual_cost || 0).toFixed(2)}\n` +
-        `Refund Dispatched: ₹${(data.metrics.refund_amount || 0).toFixed(2)}\n` +
-        `Refund ID: ${data.metrics.refund_id || data.metrics.transaction_id || "Instant UPI"}`
-      );
-
-      localStorage.removeItem("active_charge_session");
-      setActiveSession(null);
-      setScreen("receipt");
-    } catch (err) {
-      setErrorErrorMsg(err.message || "Remote stop failed. Please retry.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Automatically transition when polling reports inactive state
-  const handleAutoStop = () => {
-    localStorage.removeItem("active_charge_session");
-    // Just fetch stop endpoint to safely verify final metrics and trigger refund calculation
-    handleStopCharging();
-  };
-
-  const handleReset = () => {
-    setScreen("home");
-    setQrInput("");
-    setChargerId("");
-    setStationDetails(null);
-    setSelectedConnector(null);
-    setReceipt(null);
-    setCustomAmount("");
-    setErrorErrorMsg("");
-    verifyingRef.current = false;
-  };
-
-  // Helper formatting for durations
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  };
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-start p-4 max-w-md mx-auto relative pb-24">
