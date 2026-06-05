@@ -9,6 +9,10 @@ load_dotenv(dotenv_path=env_path)
 # Payment mode toggle: 'dummy' (Phase 1 simulation) or 'live' (Phase 2)
 PAYMENT_MODE = os.getenv("PAYMENT_MODE", "dummy")
 
+def get_payment_mode() -> str:
+    """Dynamically fetch the payment mode from environment or in-memory config to bypass module import cache."""
+    return os.getenv("PAYMENT_MODE", PAYMENT_MODE)
+
 # Razorpay Credentials
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
@@ -17,3 +21,4 @@ RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 # Server host & port configs
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
+

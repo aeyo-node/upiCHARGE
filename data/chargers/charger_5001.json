@@ -1,0 +1,335 @@
+{
+  "chargerName": "Yahoo 60kW",
+  "identity": "5001",
+  "chargerId": "5001",
+  "locationId": 1695737760992,
+  "chargePointConnectionProtocol": "GRIDSCAPE",
+  "stationType": "DC",
+  "maintenanceStatus": "light",
+  "isFree": null,
+  "featureDetails": [
+    {
+      "name": "QR Code",
+      "description": "This charger can authenticate through QR code method"
+    },
+    {
+      "name": "RFID",
+      "description": "This charger can authenticate through RFID card method"
+    },
+    {
+      "name": "Auto Charge",
+      "description": "This charger can authenticate through Auto charging method"
+    }
+  ],
+  "oem": {
+    "oemName": "Quench"
+  },
+  "device": {
+    "deviceName": "Ador Digat"
+  },
+  "available": true,
+  "evses": [
+    {
+      "status": "Active",
+      "connectorStatus": "Available",
+      "connectorErrCode": "NoError",
+      "connectorId": 1,
+      "physicalReference": "Gun A",
+      "maxOutputPower": 60,
+      "connectors": {
+        "name": "CCS 2",
+        "powerType": "DC",
+        "maxVoltage": 1000,
+        "maxAmperage": 250,
+        "maxElectricPower": 250000
+      },
+      "newTariff": {
+        "connectorId": 1,
+        "tariff": {
+          "deductiveType": "DC Tariff",
+          "isTimeBasedTariff": true,
+          "isSameForAllDay": true,
+          "hourlyTariffBreakdown": {
+            "allday": {
+              "00:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "01:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "02:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "03:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "04:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "05:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "06:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "07:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "08:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "09:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "10:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "11:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "12:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "13:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "14:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "15:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "16:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "17:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "18:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "19:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "20:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "21:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "22:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "23:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "status": "Active",
+      "connectorStatus": "Available",
+      "connectorErrCode": "NoError",
+      "connectorId": 2,
+      "physicalReference": "Gun B",
+      "maxOutputPower": 60,
+      "connectors": {
+        "name": "CCS 2",
+        "powerType": "DC",
+        "maxVoltage": 1000,
+        "maxAmperage": 250,
+        "maxElectricPower": 250000
+      },
+      "newTariff": {
+        "connectorId": 2,
+        "tariff": {
+          "deductiveType": "DC Tariff",
+          "isTimeBasedTariff": true,
+          "isSameForAllDay": true,
+          "hourlyTariffBreakdown": {
+            "allday": {
+              "00:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "01:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "02:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "03:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "04:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "05:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "06:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "07:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "08:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "09:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "10:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "11:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "12:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "13:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "14:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "15:00": {
+                "base": 5,
+                "extra": 11,
+                "vat": 18
+              },
+              "16:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "17:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "18:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "19:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "20:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "21:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "22:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              },
+              "23:00": {
+                "base": 9.3,
+                "extra": 13,
+                "vat": 18
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "tariff": [
+    {
+      "deductiveType": "DC Tariff",
+      "baseDeductiveAmount": 15.24,
+      "extraDeductiveAmount": 0,
+      "vat": 18
+    }
+  ]
+}

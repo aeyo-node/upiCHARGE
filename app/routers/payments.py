@@ -14,7 +14,7 @@ if API_CALL_DIR not in sys.path:
     sys.path.append(API_CALL_DIR)
 
 from charger_action import charger_action
-from app.config import PAYMENT_MODE, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET
+from app.config import get_payment_mode, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
@@ -160,8 +160,8 @@ def get_payments_config():
     Returns the current payment mode and public key for the frontend to decide checkout flows.
     """
     return {
-        "payment_mode": PAYMENT_MODE,
-        "key_id": RAZORPAY_KEY_ID if PAYMENT_MODE == "live" else "rzp_test_dummy_key_id"
+        "payment_mode": get_payment_mode(),
+        "key_id": RAZORPAY_KEY_ID if get_payment_mode() == "live" else "rzp_test_dummy_key_id"
     }
 
 @router.post("/create-order")
@@ -180,7 +180,7 @@ async def create_order(req: CreateOrderRequest):
         "prepaid_amount": str(req.amount)
     }
 
-    if PAYMENT_MODE != "live":
+    if get_payment_mode() != "live":
         # Simulated Dummy Order
         mock_order_id = f"order_mock_{int(datetime.now(timezone.utc).timestamp())}"
         print(f"[Create Order Dummy] Generated mock order: {mock_order_id} for ₹{req.amount}")
@@ -259,7 +259,7 @@ async def razorpay_webhook(
     webhook_body = await request.body()
     
     # 2. Verify Signature in Production Mode
-    if PAYMENT_MODE == "live" or RAZORPAY_WEBHOOK_SECRET:
+    if get_payment_mode() == "live" or RAZORPAY_WEBHOOK_SECRET:
         if not x_razorpay_signature:
             print("[Webhook Error] Missing X-Razorpay-Signature header in live request.")
             raise HTTPException(status_code=400, detail="Missing signature header")
@@ -356,7 +356,7 @@ async def razorpay_webhook(
         qr_response_data = {}
         tx_id = None
 
-        if PAYMENT_MODE == "dummy":
+        if get_payment_mode() == "dummy":
             print("[Webhook Dummy Start] Simulating successful QR start in dummy mode.")
             qr_start_success = True
             tx_id = f"sim_tx_{int(datetime.now(timezone.utc).timestamp())}"

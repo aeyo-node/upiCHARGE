@@ -14,7 +14,7 @@ sys.path.append(API_CALL_DIR)
 from charger_action import charger_action
 from chargepoints import fetch_chargepoint_details, resolve_charger
 from auth_key import get_auth_token
-from app.config import PAYMENT_MODE, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+from app.config import get_payment_mode, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
 from RemoteStop import extract_active_tx_metrics, calculate_detailed_billing
 from app.routers.payments import upsert_transaction
 
@@ -77,9 +77,14 @@ def clear_active_payment(charger_id: str):
 
 def parse_qr_code(qr_data: str) -> str:
     """
-    Parses QR format 'CM-CMOD0135-VLEM' to return 'CMOD0135'.
-    If the format doesn't match, returns the raw input.
+    Parses scanned QR data (either raw like 'CM-CMOD0135-VLEM', a URL, or already clean id).
     """
+    qr_data = qr_data.strip()
+    if "/" in qr_data:
+        parts = [p for p in qr_data.split("/") if p]
+        if parts:
+            qr_data = parts[-1]
+            
     if qr_data.startswith("CM-"):
         parts = qr_data.split("-")
         if len(parts) >= 2:
@@ -166,7 +171,7 @@ def start_charging(req: StartChargingRequest):
     print(f"[DEBUG /start] charger_action result: {res}\n")
     
     if "error" in res or res.get("status") != "success":
-        if PAYMENT_MODE == "dummy":
+        if get_payment_mode() == "dummy":
             print(f"[DEBUG /start] charger_action failed: {res}. Bypassing failure since PAYMENT_MODE is 'dummy'. Generating simulated session...")
             res = {
                 "status": "success",
@@ -180,7 +185,7 @@ def start_charging(req: StartChargingRequest):
             )
         
     # Save active session if PAYMENT_MODE is dummy
-    if PAYMENT_MODE == "dummy":
+    if get_payment_mode() == "dummy":
         try:
             import json
             sim_dir = os.path.join(BASE_DIR, "data")
@@ -228,7 +233,7 @@ def get_charging_status(charger_id: str):
     """
     # 0. Check for active simulation session
     sim_path = os.path.join(BASE_DIR, "data", "active_simulation_session.json")
-    if PAYMENT_MODE == "dummy" and os.path.exists(sim_path):
+    if get_payment_mode() == "dummy" and os.path.exists(sim_path):
         try:
             import json
             with open(sim_path, "r") as f:
@@ -428,7 +433,7 @@ def stop_charging(req: StopChargingRequest):
     """
     # 0. Intercept active simulation session stopping
     sim_path = os.path.join(BASE_DIR, "data", "active_simulation_session.json")
-    if PAYMENT_MODE == "dummy" and os.path.exists(sim_path):
+    if get_payment_mode() == "dummy" and os.path.exists(sim_path):
         try:
             import json
             with open(sim_path, "r") as f:
@@ -618,7 +623,7 @@ def stop_charging(req: StopChargingRequest):
     
     # 5. Process Refund
     refund_status = "simulated"
-    if PAYMENT_MODE == "live" and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+    if get_payment_mode() == "live" and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
         if payment_id:
             try:
                 import razorpay

@@ -14,7 +14,7 @@ if API_CALL_DIR not in sys.path:
     sys.path.append(API_CALL_DIR)
 
 from charger_action import charger_action
-from app.config import PAYMENT_MODE, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+from app.config import get_payment_mode, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
 from app.routers.payments import upsert_transaction
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -77,7 +77,7 @@ def process_manual_refund(payload: RefundPayload):
     refund_id = None
     msg = ""
 
-    if PAYMENT_MODE == "live" and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+    if get_payment_mode() == "live" and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
         try:
             client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
             refund_amount_paise = int(round(refund_amount * 100))
@@ -145,7 +145,7 @@ def get_active_sessions():
             pass
 
     return {
-        "payment_mode": PAYMENT_MODE,
+        "payment_mode": get_payment_mode(),
         "active_simulation_session": sim_session,
         "active_payments": active_payments
     }
@@ -167,7 +167,7 @@ def admin_remote_start(payload: RemoteStartPayload):
     )
 
     if "error" in res or res.get("status") != "success":
-        if PAYMENT_MODE == "dummy":
+        if get_payment_mode() == "dummy":
             # Simulate start success in dummy mode
             res = {
                 "status": "success",
@@ -177,7 +177,7 @@ def admin_remote_start(payload: RemoteStartPayload):
             raise HTTPException(status_code=400, detail=res.get("error") or "Remote start failed")
 
     # In dummy mode, save simulation session as well
-    if PAYMENT_MODE == "dummy":
+    if get_payment_mode() == "dummy":
         sim_path = os.path.join(BASE_DIR, "data", "active_simulation_session.json")
         session_info = {
             "charger_id": payload.charger_id,
@@ -215,7 +215,7 @@ def admin_remote_stop(payload: RemoteStopPayload):
     print(f"[Admin Remote Stop] Direct trigger: Charger {payload.charger_id}")
     
     # 1. Stop Charger simulation
-    if PAYMENT_MODE == "dummy":
+    if get_payment_mode() == "dummy":
         sim_path = os.path.join(BASE_DIR, "data", "active_simulation_session.json")
         if os.path.exists(sim_path):
             try:
@@ -313,7 +313,7 @@ def get_config():
     Returns current active server configuration mode.
     """
     return {
-        "payment_mode": PAYMENT_MODE
+        "payment_mode": get_payment_mode()
     }
 
 @router.post("/config")

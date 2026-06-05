@@ -1,15 +1,15 @@
 {
   "chargepoints": [
     {
-      "identity": "CMOD0135",
-      "chargerName": "Akshaya | 60kW",
-      "locationName": "Akshaya EVCS | Kazhakkoottam",
-      "locationId": 1744992510651,
+      "identity": "5001",
+      "chargerName": "Yahoo 60kW",
+      "locationName": "ALPHA EVCS YAHOO SUPER BAZZAR",
+      "locationId": 1695737760992,
       "geoLocation": {
         "type": "Point",
         "coordinates": [
-          76.874478,
-          8.565411
+          76.90492,
+          8.51093
         ]
       }
     }
