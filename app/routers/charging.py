@@ -16,6 +16,7 @@ from chargepoints import fetch_chargepoint_details, resolve_charger
 from auth_key import get_auth_token
 from app.config import PAYMENT_MODE, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
 from RemoteStop import extract_active_tx_metrics, calculate_detailed_billing
+from app.routers.payments import upsert_transaction
 
 router = APIRouter(prefix="/api/charging", tags=["charging"])
 
@@ -29,12 +30,12 @@ PROJECT_ID = "6494141957d29409895704d2"
 class StartChargingRequest(BaseModel):
     charger_id: str
     connector_id: int
-    customer_mobile: str
+    customer_mobile: str = "9999999999"
     prepaid_amount: float
 
 class StopChargingRequest(BaseModel):
     charger_id: str
-    customer_mobile: str
+    customer_mobile: str = "9999999999"
     prepaid_amount: float
 
 
@@ -196,6 +197,18 @@ def start_charging(req: StartChargingRequest):
             with open(sim_path, "w") as f:
                 json.dump(session_info, f, indent=2)
             print(f"[start-simulation] Saved simulated active session to {sim_path}")
+            
+            # Log to transaction database
+            upsert_transaction(
+                charger_id=req.charger_id,
+                status="captured",
+                captured_at=datetime.now(timezone.utc).isoformat(),
+                charging_status="charging",
+                charging_start_time=datetime.now(timezone.utc).isoformat(),
+                charge_mod_tx_id="sim_tx_" + str(int(datetime.now(timezone.utc).timestamp())),
+                customer_mobile=req.customer_mobile,
+                amount=req.prepaid_amount
+            )
         except Exception as sim_err:
             print(f"[start-simulation] Failed to save simulated active session: {sim_err}")
         
@@ -648,6 +661,29 @@ def stop_charging(req: StopChargingRequest):
         msg = f"Stop successful, but refund could not be initiated (Missing payment ID)."
     else:
         msg = f"Refund of Rs. {refund_amount:.2f} processed (Simulated)."
+
+    # Save/update database record
+    try:
+        ref_id = None
+        if refund_status.startswith("refunded_via_razorpay:"):
+            ref_id = refund_status.split(":", 1)[1].strip()
+        elif "refund_res" in locals() and isinstance(refund_res, dict):
+            ref_id = refund_res.get("id")
+            
+        upsert_transaction(
+            payment_id=payment_id,
+            charger_id=req.charger_id,
+            charging_status="stopped",
+            charging_stop_time=stop_time_raw,
+            energy_kwh=billing["energy_kwh"],
+            cost_rs=billing["total_amount"],
+            refund_status=refund_status,
+            refund_amount=refund_amount,
+            refund_id=ref_id,
+            refunded_at=datetime.now(timezone.utc).isoformat() if ("refunded" in refund_status or "simulated" in refund_status) and refund_amount > 0 else None
+        )
+    except Exception as db_err:
+        print(f"[Stop Database update error] {db_err}")
 
     return {
         "status": "success",

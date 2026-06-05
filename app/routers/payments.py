@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/payments", tags=["payments"])
 class CreateOrderRequest(BaseModel):
     charger_id: str
     connector_id: int
-    customer_mobile: str
+    customer_mobile: str = "9999999999"
     amount: float
 
 def clean_mobile(phone: str) -> str:
@@ -37,6 +37,87 @@ def clean_mobile(phone: str) -> str:
     if len(phone) == 10:
         return phone
     return phone
+
+def upsert_transaction(order_id: str = None, payment_id: str = None, **kwargs) -> dict:
+    """
+    Saves or updates a transaction in data/transactions_db.json.
+    Matches existing by order_id or payment_id.
+    """
+    try:
+        import os
+        import json
+        from datetime import datetime, timezone
+        
+        data_dir = os.path.join(BASE_DIR, "data")
+        os.makedirs(data_dir, exist_ok=True)
+        filepath = os.path.join(data_dir, "transactions_db.json")
+        
+        db = []
+        if os.path.exists(filepath):
+            with open(filepath, "r") as f:
+                try:
+                    db = json.load(f)
+                except Exception:
+                    db = []
+                    
+        # Find existing transaction
+        tx = None
+        for r in db:
+            if order_id and r.get("order_id") == order_id:
+                tx = r
+                break
+            if payment_id and r.get("payment_id") == payment_id:
+                tx = r
+                break
+            if not order_id and not payment_id and kwargs.get("charger_id") and r.get("charger_id") == kwargs.get("charger_id") and r.get("status") == "created":
+                tx = r
+                break
+            if not order_id and not payment_id and kwargs.get("charger_id") and r.get("charger_id") == kwargs.get("charger_id") and r.get("charging_status") == "charging":
+                tx = r
+                break
+                
+        if tx is None:
+            # Create a brand new transaction record
+            tx = {
+                "order_id": order_id,
+                "payment_id": payment_id,
+                "charger_id": kwargs.get("charger_id"),
+                "connector_id": kwargs.get("connector_id", 1),
+                "amount": kwargs.get("amount", 0.0),
+                "customer_mobile": kwargs.get("customer_mobile", "9999999999"),
+                "status": kwargs.get("status", "created"),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "captured_at": None,
+                "charging_status": "not_started",
+                "charging_start_time": None,
+                "charging_stop_time": None,
+                "charge_mod_tx_id": None,
+                "energy_kwh": 0.0,
+                "cost_rs": 0.0,
+                "refund_status": "none",
+                "refund_amount": 0.0,
+                "refund_id": None,
+                "refunded_at": None
+            }
+            db.append(tx)
+            
+        # Update any explicitly passed arguments
+        for k, v in kwargs.items():
+            if v is not None:
+                tx[k] = v
+                
+        # Fill in payment_id if we didn't have it and it's passed now
+        if payment_id and not tx.get("payment_id"):
+            tx["payment_id"] = payment_id
+            
+        with open(filepath, "w") as f:
+            json.dump(db, f, indent=2)
+            
+        print(f"[DB Log] Upserted transaction Order={order_id}, Payment={payment_id}, Status={tx.get('status')}")
+        return tx
+    except Exception as e:
+        print(f"[DB Log Error] Failed to upsert transaction: {e}")
+        return {}
 
 def save_active_payment(charger_id: str, payment_id: str, amount: float, customer_mobile: str, connector_id: int = 1, transaction_id: str = None):
     """
@@ -103,6 +184,14 @@ async def create_order(req: CreateOrderRequest):
         # Simulated Dummy Order
         mock_order_id = f"order_mock_{int(datetime.now(timezone.utc).timestamp())}"
         print(f"[Create Order Dummy] Generated mock order: {mock_order_id} for ₹{req.amount}")
+        upsert_transaction(
+            order_id=mock_order_id,
+            charger_id=str(req.charger_id).strip(),
+            connector_id=int(req.connector_id),
+            amount=float(req.amount),
+            customer_mobile=customer_phone,
+            status="created"
+        )
         return {
             "key": "rzp_test_dummy_key_id",
             "amount": amount_paise,
@@ -132,6 +221,14 @@ async def create_order(req: CreateOrderRequest):
         }
         order = client.order.create(data=order_payload)
         print(f"[Create Order Live] Successfully created Razorpay order: {order.get('id')}")
+        upsert_transaction(
+            order_id=order.get("id"),
+            charger_id=str(req.charger_id).strip(),
+            connector_id=int(req.connector_id),
+            amount=float(req.amount),
+            customer_mobile=customer_phone,
+            status="created"
+        )
         return {
             "key": RAZORPAY_KEY_ID,
             "amount": amount_paise,
@@ -227,8 +324,7 @@ async def razorpay_webhook(
             return {"status": "ignored", "reason": "No charger_id in notes"}
 
         if not customer_mobile:
-            print("[Webhook Process Error] No contact number resolved. Cannot start session.")
-            return {"status": "ignored", "reason": "No customer mobile resolved"}
+            customer_mobile = "9999999999"
 
         # 5. Fetch connection type for the new custom API
         connection_type = "GRIDSCAPE"
@@ -296,6 +392,18 @@ async def razorpay_webhook(
             print(f"[Webhook Actions] QR Start API successful. Captured Transaction ID: {tx_id}")
             # Save mapping with transaction_id and connector_id
             save_active_payment(charger_id, payment_id, prepaid_amount, customer_mobile, connector_id, tx_id)
+            upsert_transaction(
+                payment_id=payment_id,
+                charger_id=charger_id,
+                connector_id=connector_id,
+                amount=prepaid_amount,
+                customer_mobile=customer_mobile,
+                status="captured",
+                captured_at=datetime.now(timezone.utc).isoformat(),
+                charging_status="charging",
+                charging_start_time=datetime.now(timezone.utc).isoformat(),
+                charge_mod_tx_id=tx_id
+            )
             return {
                 "status": "success",
                 "message": "Payment captured and charger successfully started via new QR API",
@@ -320,11 +428,35 @@ async def razorpay_webhook(
             save_active_payment(charger_id, payment_id, prepaid_amount, customer_mobile, connector_id)
             
             if "error" in res or res.get("status") != "success":
+                upsert_transaction(
+                    payment_id=payment_id,
+                    charger_id=charger_id,
+                    connector_id=connector_id,
+                    amount=prepaid_amount,
+                    customer_mobile=customer_mobile,
+                    status="captured",
+                    captured_at=datetime.now(timezone.utc).isoformat(),
+                    charging_status="failed",
+                    cost_rs=0.0
+                )
                 raise HTTPException(
                     status_code=400,
                     detail=f"Payment received, but failed to start charger: {res.get('error') or res.get('message')}"
                 )
             
+            v1_tx_id = res.get("transactionId") or "v1_fallback_tx"
+            upsert_transaction(
+                payment_id=payment_id,
+                charger_id=charger_id,
+                connector_id=connector_id,
+                amount=prepaid_amount,
+                customer_mobile=customer_mobile,
+                status="captured",
+                captured_at=datetime.now(timezone.utc).isoformat(),
+                charging_status="charging",
+                charging_start_time=datetime.now(timezone.utc).isoformat(),
+                charge_mod_tx_id=v1_tx_id
+            )
             return {
                 "status": "success",
                 "message": "Payment captured and charger successfully started via V1 fallback",

@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import HOST, PORT, PAYMENT_MODE
-from app.routers import charging, payments
+from app.routers import charging, payments, admin
 
 app = FastAPI(
     title="UPICharge.com Backend",
@@ -22,6 +22,7 @@ app.add_middleware(
 # Include Routers
 app.include_router(charging.router)
 app.include_router(payments.router)
+app.include_router(admin.router)
 
 @app.on_event("startup")
 def startup_event():

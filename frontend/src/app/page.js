@@ -72,7 +72,7 @@ export default function Home() {
   const [selectedConnector, setSelectedConnector] = useState(null);
   const [prepaidAmount, setPrepaidAmount] = useState(200);
   const [customAmount, setCustomAmount] = useState("");
-  const [customerMobile, setCustomerMobile] = useState("");
+  const [customerMobile, setCustomerMobile] = useState("9999999999");
   
   // Charging state feedback
   const [loading, setLoading] = useState(false);
@@ -876,7 +876,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* ==================== SCREEN 2: CONNECTOR / GUN SELECTION ==================== */}
+      {/* ==================== SCREEN 2: CONNECTOR / GUN SELECTION & PREPAID AMOUNT ==================== */}
       {screen === "connector" && stationDetails && (
         <div className="w-full space-y-6 animate-fadeIn">
           {/* Station card details */}
@@ -940,117 +940,87 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Customer login Details form */}
-          <div className="glass rounded-3xl p-6 space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-apple-silver">Enter Customer Mobile</h3>
-            <div className="relative">
-              <input 
-                type="tel" 
-                maxLength={10}
-                placeholder="Enter 10-digit registered number" 
-                value={customerMobile}
-                onChange={(e) => setCustomerMobile(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5 text-sm font-semibold tracking-wide placeholder-white/20 text-white"
-              />
-            </div>
-            
-            <button 
-              onClick={handleProceedToPayment}
-              disabled={loading || !selectedConnector || !customerMobile}
-              className="w-full bg-apple-accent text-white font-semibold py-4 rounded-2xl shadow-lg shadow-apple-accent/20 transition active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2 text-sm"
-            >
-              <span>Proceed to Prepaid Selection</span>
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
+          {/* Combined Prepaid Section - displays instantly when a connector is selected */}
+          {selectedConnector && (
+            <div className="space-y-6 animate-fadeIn">
+              {/* Prepaid selection section */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-apple-silver px-1">Select Prepaid Amount</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  {[100, 200, 500].map((amt) => {
+                    const isSelected = prepaidAmount === amt && !customAmount;
+                    return (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => {
+                          setPrepaidAmount(amt);
+                          setCustomAmount("");
+                        }}
+                        className={`py-4 rounded-2xl font-bold border transition text-sm ${
+                          isSelected 
+                            ? "border-apple-accent bg-apple-accent/10 text-apple-accent" 
+                            : "border-white/10 glass text-white hover:bg-white/5"
+                        }`}
+                      >
+                        ₹{amt}
+                      </button>
+                    );
+                  })}
+                </div>
 
-      {/* ==================== SCREEN 3: PREPAID AMOUNT SELECTION ==================== */}
-      {screen === "payment" && (
-        <div className="w-full space-y-6 animate-fadeIn">
-          <div className="glass rounded-[32px] p-6 space-y-4 relative">
-            <h2 className="font-extrabold text-2xl tracking-tight text-white">Prepaid Pre-Authorization</h2>
-            <p className="text-xs text-apple-silver leading-relaxed font-light">
-              Select or enter the amount you want to reserve. After charging completes, **any unused balance is immediately refunded back to your UPI account**.
-            </p>
-          </div>
+                {/* Custom Amount Field */}
+                <div className="glass rounded-3xl p-5 space-y-3">
+                  <span className="text-xs font-bold text-apple-silver uppercase">Or Custom Prepaid Amount (Rs.)</span>
+                  <input 
+                    type="number" 
+                    placeholder="Enter custom amount (e.g. 350)" 
+                    value={customAmount}
+                    onChange={(e) => setCustomAmount(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5 text-sm font-semibold tracking-wide placeholder-white/20 text-white"
+                  />
+                </div>
+              </div>
 
-          {/* Standard numerical amount chips */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-apple-silver px-1">Select Prepaid Amount</h3>
-            <div className="grid grid-cols-3 gap-3">
-              {[100, 200, 500].map((amt) => {
-                const isSelected = prepaidAmount === amt && !customAmount;
-                return (
-                  <button
-                    key={amt}
-                    onClick={() => {
-                      setPrepaidAmount(amt);
-                      setCustomAmount("");
-                    }}
-                    className={`py-4 rounded-2xl font-bold border transition text-sm ${
-                      isSelected 
-                        ? "border-apple-accent bg-apple-accent/10 text-apple-accent" 
-                        : "border-white/10 glass text-white hover:bg-white/5"
-                    }`}
-                  >
-                    ₹{amt}
-                  </button>
-                );
-              })}
-            </div>
+              {/* Secure Payment Trigger */}
+              <div className="glass rounded-3xl p-6 space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-white/5 text-xs text-apple-silver">
+                  <span>Prepaid Selected:</span>
+                  <span className="font-bold text-white text-lg">₹{customAmount ? customAmount : prepaidAmount}</span>
+                </div>
 
-            {/* Custom Amount Field */}
-            <div className="glass rounded-3xl p-5 space-y-3">
-              <span className="text-xs font-bold text-apple-silver uppercase">Or Custom Prepaid Amount (Rs.)</span>
-              <input 
-                type="number" 
-                placeholder="Enter custom amount (e.g. 350)" 
-                value={customAmount}
-                onChange={(e) => setCustomAmount(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5 text-sm font-semibold tracking-wide placeholder-white/20 text-white"
-              />
-            </div>
-          </div>
+                <div className="text-center py-2 space-y-2">
+                  <span className="text-[10px] uppercase font-bold tracking-widest text-apple-silver">Supported Gateways (UPI Intent)</span>
+                  <div className="flex justify-center space-x-6 text-white/30 text-xs font-bold">
+                    <span>GPay</span>
+                    <span>PhonePe</span>
+                    <span>Paytm</span>
+                    <span>BHIM</span>
+                  </div>
+                </div>
 
-          {/* Secure Payment Trigger Simulation */}
-          <div className="glass rounded-3xl p-6 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-white/5 text-xs text-apple-silver">
-              <span>Prepaid Selected:</span>
-              <span className="font-bold text-white text-lg">₹{customAmount ? customAmount : prepaidAmount}</span>
-            </div>
-
-            <div className="text-center py-2 space-y-2">
-              <span className="text-[10px] uppercase font-bold tracking-widest text-apple-silver">Supported Gateways (UPI Intent)</span>
-              <div className="flex justify-center space-x-6 text-white/30 text-xs font-bold">
-                <span>GPay</span>
-                <span>PhonePe</span>
-                <span>Paytm</span>
-                <span>BHIM</span>
+                {/* Checkout / Payment CTA Button */}
+                <button 
+                  onClick={handleStartCharging}
+                  disabled={loading}
+                  className={`w-full font-bold py-4 rounded-2xl shadow-lg transition active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2 text-sm ${
+                    isDummyMode 
+                      ? "bg-apple-emerald text-black shadow-apple-emerald/20 glow-emerald" 
+                      : "bg-[#e07a2c] text-white shadow-orange-500/20"
+                  }`}
+                >
+                  {loading ? (
+                    <Loader2 className={`h-5 w-5 animate-spin ${isDummyMode ? "text-black" : "text-white"}`} />
+                  ) : (
+                    <>
+                      <Sparkles className={`h-4 w-4 ${isDummyMode ? "text-black" : "text-white"}`} />
+                      <span>{isDummyMode ? "Simulate Payment & Start Charging" : "Pay & Start Charging"}</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
-
-            {/* Checkout / Payment CTA Button */}
-            <button 
-              onClick={handleStartCharging}
-              disabled={loading}
-              className={`w-full font-bold py-4 rounded-2xl shadow-lg transition active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2 text-sm ${
-                isDummyMode 
-                  ? "bg-apple-emerald text-black shadow-apple-emerald/20 glow-emerald" 
-                  : "bg-[#e07a2c] text-white shadow-orange-500/20"
-              }`}
-            >
-              {loading ? (
-                <Loader2 className={`h-5 w-5 animate-spin ${isDummyMode ? "text-black" : "text-white"}`} />
-              ) : (
-                <>
-                  <Sparkles className={`h-4 w-4 ${isDummyMode ? "text-black" : "text-white"}`} />
-                  <span>{isDummyMode ? "Simulate Payment & Start Charging" : "Pay & Start Charging"}</span>
-                </>
-              )}
-            </button>
-          </div>
+          )}
         </div>
       )}
 
