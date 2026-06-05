@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import Script from "next/script";
 import { 
   Camera, 
   MapPin, 
@@ -31,6 +32,7 @@ import {
 
 export default function Home() {
   const [apiBase, setApiBase] = useState("http://localhost:8000");
+  const [isDummyMode, setIsDummyMode] = useState(true);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -41,6 +43,23 @@ export default function Home() {
       }
     }
   }, []);
+
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/payments/config`);
+        if (res.ok) {
+          const config = await res.json();
+          setIsDummyMode(config.payment_mode !== "live");
+        }
+      } catch (err) {
+        console.error("Failed to fetch payment config:", err);
+      }
+    };
+    if (apiBase) {
+      fetchConfig();
+    }
+  }, [apiBase]);
 
   // State management for screen transition:
   // 'home' | 'connector' | 'payment' | 'charging' | 'receipt' | 'support' | 'map'
@@ -564,39 +583,101 @@ export default function Home() {
     const finalPrepaid = customAmount ? parseFloat(customAmount) : prepaidAmount;
 
     try {
-      // POST to start charging endpoint (direct physical start bypass)
-      const res = await fetch(`${apiBase}/api/charging/start`, {
+      // 1. Create a secure prepaid order from payments endpoint
+      const res = await fetch(`${apiBase}/api/payments/create-order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           charger_id: chargerId,
           connector_id: selectedConnector.connector_id,
           customer_mobile: customerMobile,
-          prepaid_amount: finalPrepaid
+          amount: finalPrepaid
         })
       });
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.detail || "Failed to start charger.");
+        throw new Error(errData.detail || "Failed to create payment order.");
       }
 
-      const initialSession = {
-        charger_id: chargerId,
-        connector_id: selectedConnector.connector_id,
-        customer_mobile: customerMobile,
-        prepaid_amount: finalPrepaid,
-        energy_kwh: 0,
-        cost_rs: 0,
-        elapsed_seconds: 0
-      };
+      const orderData = await res.json();
 
-      // Save to localStorage for recovery
-      localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
-      setActiveSession(initialSession);
-      setScreen("charging");
+      // 2. Decide flow based on payment_mode / dummy_mode
+      if (orderData.dummy_mode === true) {
+        // Bypass Razorpay widget, trigger /api/charging/start directly
+        const startRes = await fetch(`${apiBase}/api/charging/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            charger_id: chargerId,
+            connector_id: selectedConnector.connector_id,
+            customer_mobile: customerMobile,
+            prepaid_amount: finalPrepaid
+          })
+        });
+
+        if (!startRes.ok) {
+          const errData = await startRes.json();
+          throw new Error(errData.detail || "Failed to start charger in simulation.");
+        }
+
+        const initialSession = {
+          charger_id: chargerId,
+          connector_id: selectedConnector.connector_id,
+          customer_mobile: customerMobile,
+          prepaid_amount: finalPrepaid,
+          energy_kwh: 0,
+          cost_rs: 0,
+          elapsed_seconds: 0
+        };
+
+        // Save to localStorage for recovery
+        localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
+        setActiveSession(initialSession);
+        setScreen("charging");
+      } else {
+        // Live Razorpay Mode
+        if (typeof window === "undefined" || !window.Razorpay) {
+          throw new Error("Razorpay SDK not loaded. Please try again.");
+        }
+
+        const options = {
+          key: orderData.key,
+          amount: orderData.amount,
+          currency: orderData.currency,
+          name: orderData.name,
+          description: orderData.description,
+          order_id: orderData.order_id,
+          handler: function (response) {
+            // Payment success callback from widget
+            const initialSession = {
+              charger_id: chargerId,
+              connector_id: selectedConnector.connector_id,
+              customer_mobile: customerMobile,
+              prepaid_amount: finalPrepaid,
+              energy_kwh: 0,
+              cost_rs: 0,
+              elapsed_seconds: 0
+            };
+            localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
+            setActiveSession(initialSession);
+            setScreen("charging");
+          },
+          prefill: orderData.prefill,
+          theme: { color: "#e07a2c" }
+        };
+
+        const rzp = new window.Razorpay(options);
+        
+        rzp.on("payment.failed", function (response) {
+          console.error("Payment failed:", response.error);
+          setErrorErrorMsg(response.error.description || "Payment failed.");
+        });
+
+        rzp.open();
+      }
     } catch (err) {
-      setErrorErrorMsg(err.message || "Start charger failed.");
+      setErrorErrorMsg(err.message || "Checkout failed.");
       setScreen("connector");
     } finally {
       setLoading(false);
@@ -938,18 +1019,22 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Phase 1 Simulated Checkout CTA */}
+            {/* Checkout / Payment CTA Button */}
             <button 
               onClick={handleStartCharging}
               disabled={loading}
-              className="w-full bg-apple-emerald text-black font-bold py-4 rounded-2xl shadow-lg shadow-apple-emerald/20 transition active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2 text-sm glow-emerald"
+              className={`w-full font-bold py-4 rounded-2xl shadow-lg transition active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2 text-sm ${
+                isDummyMode 
+                  ? "bg-apple-emerald text-black shadow-apple-emerald/20 glow-emerald" 
+                  : "bg-[#e07a2c] text-white shadow-orange-500/20"
+              }`}
             >
               {loading ? (
-                <Loader2 className="h-5 w-5 animate-spin text-black" />
+                <Loader2 className={`h-5 w-5 animate-spin ${isDummyMode ? "text-black" : "text-white"}`} />
               ) : (
                 <>
-                  <Sparkles className="h-4 w-4 text-black" />
-                  <span>Simulate Payment & Start Charging</span>
+                  <Sparkles className={`h-4 w-4 ${isDummyMode ? "text-black" : "text-white"}`} />
+                  <span>{isDummyMode ? "Simulate Payment & Start Charging" : "Pay & Start Charging"}</span>
                 </>
               )}
             </button>
@@ -1353,6 +1438,7 @@ export default function Home() {
           </button>
         </nav>
       )}
+      <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="afterInteractive" />
     </main>
   );
 }

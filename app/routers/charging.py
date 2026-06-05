@@ -1,6 +1,7 @@
 import sys
 import os
 import requests
+import json
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -38,6 +39,40 @@ class StopChargingRequest(BaseModel):
 
 
 # --- Helper Function ---
+
+def get_active_payment(charger_id: str) -> dict:
+    """
+    Retrieves the active payment mapping for a charger from data/active_payments.json.
+    """
+    try:
+        import json
+        filepath = os.path.join(BASE_DIR, "data", "active_payments.json")
+        if os.path.exists(filepath):
+            with open(filepath, "r") as f:
+                data = json.load(f)
+                return data.get(str(charger_id).strip())
+    except Exception as e:
+        print(f"[Charging Router Helper] Error reading payment mapping: {e}")
+    return None
+
+def clear_active_payment(charger_id: str):
+    """
+    Deletes the active payment mapping for a charger from data/active_payments.json.
+    """
+    try:
+        import json
+        filepath = os.path.join(BASE_DIR, "data", "active_payments.json")
+        if os.path.exists(filepath):
+            with open(filepath, "r") as f:
+                data = json.load(f)
+            key = str(charger_id).strip()
+            if key in data:
+                del data[key]
+                with open(filepath, "w") as f:
+                    json.dump(data, f, indent=2)
+                print(f"[Charging Router Helper] Cleared payment mapping for charger {charger_id}")
+    except Exception as e:
+        print(f"[Charging Router Helper] Error clearing payment mapping: {e}")
 
 def parse_qr_code(qr_data: str) -> str:
     """
@@ -448,13 +483,62 @@ def stop_charging(req: StopChargingRequest):
             )
     else:
         # 1. Stop Charger
-        # Pass "0000000000" as confirmed_mobile to bypass phone number mismatch checks,
-        # since upiCHARGE is a guest pre-authorized platform and stops are always fully trusted.
+        # Try calling the new custom QR Remote Stop API directly if we have a transaction ID
+        stop_success = False
+        active_payment = get_active_payment(req.charger_id)
+        if active_payment and active_payment.get("transaction_id"):
+            tx_id = active_payment["transaction_id"]
+            conn_id = active_payment.get("connector_id") or 1
+            
+            # Fetch connection protocol
+            connection_type = "GRIDSCAPE"
+            try:
+                details = fetch_chargepoint_details(req.charger_id)
+                if details:
+                    connection_type = details.get("chargePointConnectionProtocol", "GRIDSCAPE")
+            except Exception as e:
+                print(f"[Charging stop] Error fetching connection protocol: {e}")
+                
+            qr_stop_url = f"https://tts.console.chargemod.com/{req.charger_id}/Socket-RemoteStopTransaction"
+            qr_stop_payload = {
+                "transactionId": tx_id,
+                "connectionType": connection_type,
+                "connectorId": int(conn_id)
+            }
+            
+            print(f"[Charging stop] Invoking new QR RemoteStop API: {qr_stop_url}")
+            print(f"[Charging stop] Payload: {json.dumps(qr_stop_payload)}")
+            
+            try:
+                from auth_key import get_auth_token
+                token = get_auth_token()
+                headers = {
+                    "Content-Type": "application/json"
+                }
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                    
+                response = requests.post(qr_stop_url, json=qr_stop_payload, headers=headers)
+                print(f"[Charging stop] QR Stop response status: {response.status_code}")
+                print(f"[Charging stop] QR Stop response body: {response.text}")
+                
+                if response.status_code == 200:
+                    stop_success = True
+            except Exception as qr_stop_err:
+                print(f"[Charging stop] Exception on new QR Stop API: {qr_stop_err}")
+
+        if stop_success:
+            print("[Charging stop] QR Stop API succeeded. Querying final metrics via charger_action stop...")
+        else:
+            print("[Charging stop] QR Stop API not executed or failed. Falling back to V1 charger_action stop...")
+
+        # Execute charger_action stop to fetch final metrics and tear down/refund
         res = charger_action(
             action="stop",
             charger_identity=req.charger_id,
             confirmed_mobile="0000000000"
         )
+
     
     if "error" in res or (res.get("status") != "success" and res.get("status") != "no_active_session"):
         raise HTTPException(
@@ -506,22 +590,51 @@ def stop_charging(req: StopChargingRequest):
     start_time_raw = tx_details.get("start_time") or current_time_iso
     stop_time_raw = tx_details.get("stop_time") or current_time_iso
         
-    # 3. Compute Refund
-    refund_amount = max(0.0, req.prepaid_amount - billing["total_amount"])
+    # 3. Retrieve payment mapping if available
+    active_payment = get_active_payment(req.charger_id)
+    payment_id = None
+    prepaid_src = req.prepaid_amount
     
-    # 4. Process Refund
+    if active_payment:
+        payment_id = active_payment.get("payment_id")
+        prepaid_src = float(active_payment.get("prepaid_amount") or req.prepaid_amount)
+        print(f"[Charging stop] Found active payment mapping: Payment ID={payment_id}, Prepaid Amount=₹{prepaid_src}")
+        
+    # 4. Compute Refund
+    refund_amount = max(0.0, prepaid_src - billing["total_amount"])
+    
+    # 5. Process Refund
     refund_status = "simulated"
     if PAYMENT_MODE == "live" and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
-        # In Phase 2, make actual Razorpay Refund call
-        try:
-            import razorpay
-            client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-            # Note: refund must target actual transaction_id which is stored/passed.
-            # For standard Razorpay integration, we'd refund the payment_id.
-            # We'll build full payments.py matching payment_ids in Phase 2.
-            refund_status = "initiated_via_razorpay"
-        except Exception as e:
-            refund_status = f"razorpay_error: {str(e)}"
+        if payment_id:
+            try:
+                import razorpay
+                client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+                if refund_amount > 0:
+                    # Razorpay expects refund amount in subunits (paise)
+                    refund_amount_paise = int(round(refund_amount * 100))
+                    refund_data = {
+                        "amount": refund_amount_paise,
+                        "notes": {
+                            "reason": f"Automatic refund of unused charging prepaid balance for charger {req.charger_id}"
+                        }
+                    }
+                    refund_res = client.payment.refund(payment_id, refund_data)
+                    refund_status = f"refunded_via_razorpay: {refund_res.get('id')}"
+                    print(f"[Charging stop] Refund successfully initiated via Razorpay: {refund_res.get('id')} for ₹{refund_amount}")
+                else:
+                    refund_status = "no_refund_needed_full_amount_used"
+                    print("[Charging stop] Refund amount is 0. No refund needed.")
+            except Exception as e:
+                refund_status = f"razorpay_error: {str(e)}"
+                print(f"[Charging stop] Razorpay Refund failed: {e}")
+        else:
+            refund_status = "missing_payment_id_for_refund"
+            print(f"[Charging stop] WARNING: Payment mode is live but no active payment mapping was found for charger {req.charger_id}. Cannot process refund.")
+            
+    # Clear the mapping now that the session has ended and refund was processed
+    if active_payment:
+        clear_active_payment(req.charger_id)
             
     return {
         "status": "success",

@@ -182,7 +182,7 @@
     },
     {
       "status": "Active",
-      "connectorStatus": "Available",
+      "connectorStatus": "Charging",
       "connectorErrCode": "NoError",
       "connectorId": 2,
       "physicalReference": "Gun 2",

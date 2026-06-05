@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import HOST, PORT, PAYMENT_MODE
-from app.routers import charging
+from app.routers import charging, payments
 
 app = FastAPI(
     title="UPICharge.com Backend",
@@ -21,6 +21,7 @@ app.add_middleware(
 
 # Include Routers
 app.include_router(charging.router)
+app.include_router(payments.router)
 
 @app.on_event("startup")
 def startup_event():
@@ -79,16 +80,8 @@ def startup_event():
             else:
                 log_diag(f"  - {num}: returned empty profile")
                 
-        # Simulate / test start flow
-        log_diag(f"\n[Startup] Simulating start flow for charger {target_charger} connector 1 with customer_mobile='9999999999'...")
-        res = charger_action(
-            action="start",
-            charger_identity=target_charger,
-            customer_mobile="9999999999",
-            connector_id=1,
-            otp_method="skip"
-        )
-        log_diag(f"[Startup] Simulated Start Response: {json.dumps(res, indent=2)}")
+        # Simulate / test start flow (Disabled in production to prevent auto-starting sessions on hot-reload)
+        log_diag("\n[Startup] Simulated startup charger start action skipped to preserve live physical charger state.")
         
     except Exception as e:
         log_diag(f"\n[Startup] Fatal exception during startup diagnostics:\n{traceback.format_exc()}")
