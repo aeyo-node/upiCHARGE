@@ -10,6 +10,11 @@ env/
 diagnostics_output.json
 specific_tx.json
 
+# Dynamic runtime files
+data/token_cache.json
+data/support_chats.json
+data/env_debug.txt
+
 # Node / Next.js / Frontend ignores
 frontend/node_modules/
 frontend/.next/
