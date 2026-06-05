@@ -76,15 +76,14 @@ input:focus {
   width: 100% !important;
   height: 100% !important;
   border: none !important;
-  background: transparent !important;
+  background: #000 !important; /* Premium dark background while initializing */
+  border-radius: 40px;
+  overflow: hidden;
 }
 
-#qr-reader-target div,
-#qr-reader-target video,
-#qr-reader-target canvas {
+#qr-reader-target video {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
-  border-radius: 40px !important;
-  border: none !important;
+  border-radius: 40px;
 }

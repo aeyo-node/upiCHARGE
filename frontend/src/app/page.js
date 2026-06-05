@@ -25,7 +25,9 @@ import {
   ArrowLeft,
   Copy,
   Check,
-  ArrowDownCircle
+  ArrowDownCircle,
+  Upload,
+  Image
 } from "lucide-react";
 
 // API base is dynamically set inside the Home component state
@@ -82,6 +84,7 @@ export default function Home() {
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   const [copiedTx, setCopiedTx] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
+  const [lastScanned, setLastScanned] = useState("");
 
   const handleCopyTx = (txId) => {
     if (!txId) return;
@@ -505,44 +508,132 @@ export default function Home() {
 
   // Instantiates the camera scanner safely on mount or return to home
   const startScanner = async () => {
-    if (typeof window === "undefined" || scannerInstance.current) return;
+    if (typeof window === "undefined") return;
+    
+    // If already scanning, stop first to ensure a clean start
+    if (scannerInstance.current) {
+      console.log("[Scanner] Instance exists, stopping first...");
+      await stopScanner();
+    }
     
     try {
+      console.log("[Scanner] Starting initialization...");
       const { Html5Qrcode } = await import("html5-qrcode");
-      scannerInstance.current = new Html5Qrcode("qr-reader-target");
+      const scanner = new Html5Qrcode("qr-reader-target");
+      scannerInstance.current = scanner;
       
-      // Omit qrbox to scan the full camera frame, making scan detection instant and matching GPay/native feel
-      const config = { fps: 15 };
+      // Highly optimized and ultra-reliable config
+      // Omitting qrbox and aspectRatio allows html5-qrcode to scan the entire frame,
+      // eliminating coordinate mismatches and scaling/cropping bugs!
+      const config = { 
+        fps: 10, // Smoother on mobile, reduces CPU / battery drain
+      };
       
-      await scannerInstance.current.start(
-        { facingMode: "environment" },
-        config,
-        async (decodedText) => {
-          // Success! Verify station
-          await handleVerify(decodedText);
-        },
-        () => {
-          // Suppress noise logs
+      try {
+        // Try back camera by default
+        await scanner.start(
+          { facingMode: "environment" },
+          config,
+          async (decodedText) => {
+            console.log("[Scanner] Scanned:", decodedText);
+            await handleVerify(decodedText);
+          },
+          () => {} // Suppress noisy frame analysis failures
+        );
+        console.log("[Scanner] Successfully started with environment camera.");
+        setCameraActive(true);
+      } catch (innerErr) {
+        console.warn("[Scanner] FacingMode start failed, trying getCameras fallback:", innerErr);
+        // Fallback: Query all cameras and pick the first available one!
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          // Look for a camera with "back" or "rear" or "environment" in its label
+          let cameraId = devices[0].id;
+          const backCam = devices.find(d => 
+            d.label.toLowerCase().includes("back") || 
+            d.label.toLowerCase().includes("rear") ||
+            d.label.toLowerCase().includes("environment")
+          );
+          if (backCam) {
+            cameraId = backCam.id;
+            console.log("[Scanner] Fallback chose back camera:", backCam.label);
+          } else {
+            console.log("[Scanner] Fallback chose first camera:", devices[0].label);
+          }
+          
+          await scanner.start(
+            cameraId,
+            config,
+            async (decodedText) => {
+              console.log("[Scanner] Scanned via fallback:", decodedText);
+              await handleVerify(decodedText);
+            },
+            () => {}
+          );
+          console.log("[Scanner] Successfully started with fallback camera ID.");
+          setCameraActive(true);
+        } else {
+          throw new Error("No cameras found on this device.");
         }
-      );
-      setCameraActive(true);
+      }
     } catch (err) {
-      console.error("Camera scanner error:", err);
+      console.error("[Scanner] Start failed:", err);
       setCameraActive(false);
+      if (err.toString().includes("NotAllowedError") || err.toString().includes("Permission")) {
+        setErrorErrorMsg("Camera permission denied. Please enable it in browser settings and refresh.");
+      } else {
+        setErrorErrorMsg("Camera error: " + (err.message || "Unknown error"));
+      }
     }
   };
 
   const stopScanner = async () => {
+    console.log("[Scanner] Stopping...");
     setCameraActive(false);
     if (scannerInstance.current) {
       try {
         if (scannerInstance.current.isScanning) {
           await scannerInstance.current.stop();
+          console.log("[Scanner] Stopped scanning.");
         }
       } catch (err) {
-        console.error("Failed to stop scanner:", err);
+        console.warn("[Scanner] Stop error (likely already stopped):", err);
       }
       scannerInstance.current = null;
+    }
+  };
+
+  // Safe client-side file upload scanning fallback
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setErrorErrorMsg("");
+    setLoading(true);
+    
+    try {
+      console.log("[Scanner] Scanning uploaded file:", file.name);
+      
+      // Stop the camera first to prevent resources locking
+      await stopScanner();
+      
+      const { Html5Qrcode } = await import("html5-qrcode");
+      const fileScanner = new Html5Qrcode("qr-file-fallback-target");
+      
+      const decodedText = await fileScanner.scanFile(file, false);
+      console.log("[Scanner] File scan success:", decodedText);
+      
+      // Reset input value to allow scan of same file if needed
+      e.target.value = "";
+      
+      await handleVerify(decodedText);
+    } catch (err) {
+      console.error("[Scanner] File scan failed:", err);
+      setErrorErrorMsg("Could not find a valid QR code in that image. Make sure the QR code is clear, well-lit, and fully in frame.");
+      // Restart camera scanner since file scan failed
+      await startScanner();
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -562,6 +653,7 @@ export default function Home() {
     let cleanCode = inputCode || qrInput;
     if (cleanCode) {
       cleanCode = cleanCode.trim();
+      setLastScanned(cleanCode);
     }
 
     try {
@@ -880,6 +972,9 @@ export default function Home() {
               {/* Camera feed target */}
               <div id="qr-reader-target" className="absolute inset-0 w-full h-full opacity-90" />
               
+              {/* Hidden target for file-based scanner to prevent conflicts with camera */}
+              <div id="qr-file-fallback-target" className="hidden" style={{ display: 'none' }} />
+              
               {/* Simulated scanner overlay (corners & scanner line) */}
               <div className="absolute inset-0 border-[3px] border-apple-accent/40 rounded-[40px] pointer-events-none flex flex-col justify-between p-12 z-20">
                 <div className="flex justify-between">
@@ -907,20 +1002,43 @@ export default function Home() {
 
               {/* Sleek overlay badge shown when the camera is actively scanning */}
               {cameraActive && (
-                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-md px-5 py-2.5 rounded-full border border-black/5 z-30 flex items-center space-x-2 text-[#1d1d1f] text-xs font-semibold tracking-wide shadow-lg animate-fadeIn">
-                  <span className="h-2 w-2 rounded-full bg-apple-accent animate-ping" />
-                  <span>Align QR code to scan</span>
+                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center space-y-2 z-30">
+                  <div className="bg-white/90 backdrop-blur-md px-5 py-2.5 rounded-full border border-black/5 flex items-center space-x-2 text-[#1d1d1f] text-xs font-semibold tracking-wide shadow-lg animate-fadeIn">
+                    <span className="h-2 w-2 rounded-full bg-apple-accent animate-ping" />
+                    <span>Align QR code to scan</span>
+                  </div>
+                  {lastScanned && (
+                    <div className="bg-black/80 text-white/90 text-[10px] px-3 py-1 rounded-full backdrop-blur-sm animate-fadeIn">
+                      Last seen: {lastScanned}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
             
-            {/* Quick manual re-initialize action just in case camera fails or permission is denied */}
-            <button 
-              onClick={startScanner}
-              className="text-xs font-semibold text-apple-accent flex items-center glass py-2.5 px-5 rounded-full mt-2 hover:bg-black/5 border-black/5 transition active:scale-95 shadow-md"
-            >
-              <RefreshCw className="h-3 w-3 mr-1.5" /> Re-initialize Scanner
-            </button>
+            {/* Action buttons under scanner */}
+            <div className="w-full flex items-center justify-center space-x-3 mt-3 mb-1">
+              <button 
+                onClick={startScanner}
+                className="text-xs font-semibold text-[#1d1d1f] flex items-center glass py-2.5 px-4 rounded-full hover:bg-black/5 border-black/5 transition active:scale-95 shadow-md"
+                title="Restart the live camera feed"
+              >
+                <RefreshCw className="h-3 w-3 mr-1.5 text-apple-accent" /> Restart Camera
+              </button>
+
+              <label 
+                className="text-xs font-semibold text-apple-accent flex items-center glass py-2.5 px-4 rounded-full cursor-pointer hover:bg-black/5 border-black/5 transition active:scale-95 shadow-md"
+                title="Upload or snap a photo of a QR code from your gallery/camera"
+              >
+                <Upload className="h-3 w-3 mr-1.5 text-apple-accent" /> Upload QR / Photo
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  onChange={handleFileUpload}
+                  className="hidden" 
+                />
+              </label>
+            </div>
           </div>
 
           {/* Manual Charger ID Input fallback */}
