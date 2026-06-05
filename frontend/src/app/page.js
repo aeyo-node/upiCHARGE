@@ -51,6 +51,260 @@ export default function Home() {
     fetchConfig();
   }, []);
 
+  // Initialize unique Chat User ID on mount
+  useEffect(() => {
+    let uid = localStorage.getItem("upicharge_chat_user_id");
+    if (!uid) {
+      uid = "usr_" + Math.random().toString(36).substring(2, 11);
+      localStorage.setItem("upicharge_chat_user_id", uid);
+    }
+    setChatUserId(uid);
+  }, []);
+
+  // Poll support chat history when screen is "support"
+  useEffect(() => {
+    if (screen !== "support" || !chatUserId) return;
+
+    const fetchChatHistory = async () => {
+      try {
+        const res = await fetch(`/api/support/history/${chatUserId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setChatMessages(data);
+        }
+      } catch (err) {
+        console.error("Error polling chat history:", err);
+      }
+    };
+
+    fetchChatHistory();
+    const interval = setInterval(fetchChatHistory, 4000);
+    return () => clearInterval(interval);
+  }, [screen, chatUserId]);
+
+  // Send message to backend support admin
+  const handleSendChatMessage = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim() || isChatSending || !chatUserId) return;
+    
+    const text = chatInput.trim();
+    setChatInput("");
+    setIsChatSending(true);
+    
+    // Optimistic UI update
+    const optimisticMsg = {
+      sender: "user",
+      text: text,
+      timestamp: new Date().toISOString()
+    };
+    setChatMessages(prev => [...prev, optimisticMsg]);
+    
+    try {
+      const res = await fetch("/api/support/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: chatUserId,
+          text: text,
+          user_name: `User ${chatUserId.slice(-4).toUpperCase()}`
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.chat && data.chat.messages) {
+          setChatMessages(data.chat.messages);
+        }
+      }
+    } catch (err) {
+      console.error("Error sending message:", err);
+    } finally {
+      setIsChatSending(false);
+    }
+  };
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    if (screen === "support" && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages, screen]);
+
+  // Request browser geolocation and fetch chargers within 30 km when on "map" tab
+  useEffect(() => {
+    if (screen !== "map") return;
+    
+    setIsMapLoading(true);
+    setMapError("");
+
+    const fetchNearby = async (lat, lon) => {
+      try {
+        const res = await fetch(`/api/charging/nearby?lat=${lat}&lon=${lon}`);
+        if (res.ok) {
+          const data = await res.json();
+          setNearbyChargers(data.chargers || []);
+        } else {
+          setMapError("Failed to fetch nearby chargers.");
+        }
+      } catch (err) {
+        console.error("Error fetching nearby chargers:", err);
+        setMapError("Connection error while searching nearby chargers.");
+      } finally {
+        setIsMapLoading(false);
+      }
+    };
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lon = position.coords.longitude;
+          setUserLat(lat);
+          setUserLon(lon);
+          fetchNearby(lat, lon);
+        },
+        (error) => {
+          console.warn("Geolocation permission denied/timeout. Using default location near Kerala.", error);
+          const lat = 8.51093;
+          const lon = 76.90492;
+          setUserLat(lat);
+          setUserLon(lon);
+          fetchNearby(lat, lon);
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    } else {
+      console.warn("Geolocation not supported by this browser.");
+      const lat = 8.51093;
+      const lon = 76.90492;
+      fetchNearby(lat, lon);
+    }
+  }, [screen]);
+
+  // Load Leaflet dynamically and render markers on map
+  useEffect(() => {
+    if (screen !== "map" || isMapLoading || nearbyChargers.length === 0) return;
+
+    let linkNode = null;
+    let scriptNode = null;
+
+    const initMap = () => {
+      if (!window.L || !mapRef.current) return;
+
+      if (leafletMapInstance.current) {
+        leafletMapInstance.current.remove();
+        leafletMapInstance.current = null;
+      }
+
+      const L = window.L;
+      const lat = userLat || 8.51093;
+      const lon = userLon || 76.90492;
+      
+      const map = L.map(mapRef.current, {
+        zoomControl: false
+      }).setView([lat, lon], 12);
+      
+      leafletMapInstance.current = map;
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '© OpenStreetMap contributors © CARTO'
+      }).addTo(map);
+
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+      // Custom pulsing dot for user location
+      if (userLat && userLon) {
+        const userIcon = L.divIcon({
+          className: 'custom-user-marker',
+          html: `
+            <div class="relative flex items-center justify-center w-6 h-6">
+              <div class="absolute w-6 h-6 bg-[#007aff]/20 rounded-full animate-ping"></div>
+              <div class="absolute w-4 h-4 bg-[#007aff] rounded-full border-2 border-white shadow-md"></div>
+            </div>
+          `,
+          iconSize: [24, 24]
+        });
+        
+        L.marker([userLat, userLon], { icon: userIcon })
+          .addTo(map)
+          .bindPopup("<div class='font-bold text-xs text-[#1d1d1f]'>You are here</div>")
+          .openPopup();
+      }
+
+      // Plot all nearby chargers with custom pointers
+      nearbyChargers.forEach(cp => {
+        const geo = cp.geoLocation;
+        if (geo && geo.type === "Point" && geo.coordinates && geo.coordinates.length === 2) {
+          const [chargerLon, chargerLat] = geo.coordinates;
+          
+          const chargerIcon = L.divIcon({
+            className: 'custom-charger-marker',
+            html: `
+              <div class="flex items-center justify-center w-8 h-8 rounded-full bg-white border border-[#e07a2c]/30 shadow-md text-[#e07a2c] hover:scale-110 active:scale-95 transition-all">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/>
+                </svg>
+              </div>
+            `,
+            iconSize: [32, 32],
+            iconAnchor: [16, 32]
+          });
+
+          const marker = L.marker([chargerLat, chargerLon], { icon: chargerIcon }).addTo(map);
+          
+          const popupContent = `
+            <div class="p-2 text-[#1d1d1f] font-sans space-y-1 w-44">
+              <div class="font-extrabold text-xs leading-snug">${cp.chargerName}</div>
+              <div class="text-[10px] text-[#86868b] leading-tight">${cp.locationName}</div>
+              <div class="flex items-center space-x-1.5 mt-1">
+                <span class="inline-block w-2 h-2 rounded-full bg-[#34c759] animate-pulse"></span>
+                <span class="text-[10px] text-[#34c759] font-bold">${cp.distance ? cp.distance.toFixed(1) + ' km away' : 'Nearby'}</span>
+              </div>
+              <button 
+                onclick="window.selectChargerFromMap('${cp.identity}')"
+                class="mt-2 w-full bg-[#007aff] hover:bg-opacity-95 text-white font-bold py-1.5 px-3 rounded-xl text-[10px] cursor-pointer active:scale-95 transition border-none shadow-sm outline-none"
+              >
+                Select Charger
+              </button>
+            </div>
+          `;
+          
+          marker.bindPopup(popupContent, { closeButton: false, offset: [0, -24] });
+        }
+      });
+    };
+
+    window.selectChargerFromMap = (chargerId) => {
+      setQrInput(chargerId);
+      handleVerify(chargerId);
+    };
+
+    if (window.L) {
+      initMap();
+    } else {
+      // Inject Leaflet CSS
+      linkNode = document.createElement("link");
+      linkNode.rel = "stylesheet";
+      linkNode.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(linkNode);
+
+      // Inject Leaflet JS
+      scriptNode = document.createElement("script");
+      scriptNode.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      scriptNode.async = true;
+      scriptNode.onload = () => {
+        initMap();
+      };
+      document.head.appendChild(scriptNode);
+    }
+
+    return () => {
+      if (leafletMapInstance.current) {
+        leafletMapInstance.current.remove();
+        leafletMapInstance.current = null;
+      }
+    };
+  }, [screen, nearbyChargers, isMapLoading]);
+
   // State management for screen transition:
   // 'home' | 'connector' | 'payment' | 'charging' | 'receipt' | 'support' | 'map'
   const [screen, setScreen] = useState("home");
@@ -73,6 +327,24 @@ export default function Home() {
   const [copiedTx, setCopiedTx] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [lastScanned, setLastScanned] = useState("");
+
+  // Support Chat States
+  const [chatUserId, setChatUserId] = useState("");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isChatSending, setIsChatSending] = useState(false);
+
+  // Charger Locator Map States
+  const [nearbyChargers, setNearbyChargers] = useState([]);
+  const [isMapLoading, setIsMapLoading] = useState(false);
+  const [mapError, setMapError] = useState("");
+  const [userLat, setUserLat] = useState(null);
+  const [userLon, setUserLon] = useState(null);
+
+  // Refs for Chat and Map DOM containers
+  const chatEndRef = useRef(null);
+  const mapRef = useRef(null);
+  const leafletMapInstance = useRef(null);
 
   const handleCopyTx = (txId) => {
     if (!txId) return;
@@ -1499,7 +1771,7 @@ export default function Home() {
             <h3 className="text-xs font-bold uppercase tracking-wider text-[#86868b]">Direct Live Helplines</h3>
             <div className="space-y-2 text-sm">
               <a 
-                href="https://wa.me/919999999999" 
+                href="https://wa.me/918086477654" 
                 target="_blank" 
                 rel="noreferrer"
                 className="w-full p-4 rounded-2xl border border-black/5 glass hover:bg-black/5 flex items-center justify-between transition"
@@ -1513,12 +1785,100 @@ export default function Home() {
                 <ArrowRight className="h-4 w-4 text-[#86868b]" />
               </a>
 
-              <div className="w-full p-4 rounded-2xl border border-black/5 glass flex flex-col justify-start">
-                <span className="text-[10px] text-[#86868b] uppercase tracking-wider font-bold">Helpline Desk</span>
-                <span className="text-[#1d1d1f] font-bold text-lg mt-1">+91 9999 999 999</span>
-                <p className="text-xs text-[#86868b] mt-1 font-light">Available 24x7 for physical charging site assistance.</p>
-              </div>
+              <a 
+                href="tel:+918086477654"
+                className="w-full p-4 rounded-2xl border border-black/5 glass hover:bg-black/5 flex items-center justify-between transition text-left"
+              >
+                <div className="flex flex-col justify-start">
+                  <span className="text-[10px] text-[#86868b] uppercase tracking-wider font-bold">Helpline Desk</span>
+                  <span className="text-[#1d1d1f] font-bold text-lg mt-1">+91 80864 77654</span>
+                  <p className="text-xs text-[#86868b] mt-1 font-light">Available 24x7 for physical charging site assistance.</p>
+                </div>
+                <ArrowRight className="h-4 w-4 text-[#86868b]" />
+              </a>
             </div>
+          </div>
+
+          {/* Live Operator Chat card */}
+          <div className="glass rounded-3xl p-6 space-y-4 border-black/5 flex flex-col">
+            <div className="flex items-center justify-between border-b border-black/5 pb-3">
+              <div className="flex items-center space-x-2">
+                <span className="h-2 w-2 rounded-full bg-apple-emerald animate-pulse" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#1d1d1f]">Live Operator Chat</h3>
+              </div>
+              <span className="text-[10px] text-[#86868b] font-medium font-mono bg-black/5 px-2 py-0.5 rounded-full">
+                ID: {chatUserId ? chatUserId.slice(-4).toUpperCase() : ""}
+              </span>
+            </div>
+
+            {/* Chat Thread */}
+            <div className="h-60 overflow-y-auto px-1 space-y-3 flex flex-col pr-1">
+              {chatMessages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center p-4 space-y-2">
+                  <div className="h-10 w-10 rounded-full bg-apple-accent/10 flex items-center justify-center text-apple-accent">
+                    <MessageSquare className="h-5 w-5" />
+                  </div>
+                  <h4 className="text-xs font-bold text-[#1d1d1f]">No messages yet</h4>
+                  <p className="text-[10px] text-[#86868b] max-w-[200px] leading-relaxed">
+                    Ask any question! Type below to contact our active operational support deck.
+                  </p>
+                </div>
+              ) : (
+                chatMessages.map((msg, idx) => {
+                  const isUser = msg.sender === "user";
+                  return (
+                    <div
+                      key={idx}
+                      className={`flex flex-col max-w-[85%] ${
+                        isUser ? "self-end items-end" : "self-start items-start"
+                      }`}
+                    >
+                      <div
+                        className={`rounded-2xl px-4 py-2 text-xs leading-relaxed ${
+                          isUser
+                            ? "bg-apple-accent text-white rounded-br-none"
+                            : "bg-black/5 text-[#1d1d1f] rounded-bl-none"
+                        }`}
+                      >
+                        {msg.text}
+                      </div>
+                      <span className="text-[8px] text-[#86868b] mt-1 px-1 font-light">
+                        {msg.timestamp
+                          ? new Date(msg.timestamp).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : ""}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Message Input form */}
+            <form onSubmit={handleSendChatMessage} className="flex gap-2 border-t border-black/5 pt-3">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Type a message..."
+                disabled={isChatSending}
+                className="flex-1 bg-black/5 border border-black/5 rounded-xl px-4 py-2.5 text-xs font-medium placeholder-black/30 text-[#1d1d1f]"
+              />
+              <button
+                type="submit"
+                disabled={!chatInput.trim() || isChatSending}
+                className="bg-apple-accent hover:bg-opacity-90 disabled:bg-[#86868b]/20 disabled:text-[#86868b] text-white font-bold px-4 rounded-xl text-xs transition active:scale-95 flex items-center justify-center"
+              >
+                {isChatSending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <span>Send</span>
+                )}
+              </button>
+            </form>
           </div>
 
           <button 
@@ -1541,33 +1901,53 @@ export default function Home() {
           </div>
 
           <div className="glass rounded-3xl p-5 space-y-4 border-black/5">
-            <div className="h-64 bg-black/5 border border-black/10 rounded-2xl relative overflow-hidden flex items-center justify-center text-center p-6">
-              <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/10 pointer-events-none" />
-              <div className="space-y-2 z-10 flex flex-col items-center">
-                <MapPin className="h-8 w-8 text-apple-rose animate-bounce" />
-                <h4 className="font-bold text-[#1d1d1f]">Interactive Map Widget</h4>
-                <p className="text-xs text-[#86868b] px-4 font-light">
-                  Leaflet rendering in Light Mode. Near CMOD0135 (Kerala, India).
-                </p>
-              </div>
+            <div 
+              ref={mapRef} 
+              className="h-64 rounded-2xl relative shadow-inner overflow-hidden border border-black/10 bg-black/5" 
+              id="map-container"
+            >
+              {isMapLoading && (
+                <div className="absolute inset-0 bg-white/70 backdrop-blur-sm z-20 flex flex-col items-center justify-center space-y-2">
+                  <Loader2 className="h-6 w-6 text-[#e07a2c] animate-spin" />
+                  <span className="text-[10px] text-[#86868b] font-medium">Scanning 30 km radius...</span>
+                </div>
+              )}
+              {mapError && (
+                <div className="absolute inset-0 bg-white/90 z-20 flex flex-col items-center justify-center p-4 text-center space-y-2">
+                  <AlertCircle className="h-6 w-6 text-apple-rose" />
+                  <span className="text-xs text-[#1d1d1f] font-bold">{mapError}</span>
+                </div>
+              )}
             </div>
 
-            <div className="space-y-2">
-              <div className="glass-light p-4 rounded-2xl flex items-start justify-between border-black/5">
-                <div className="space-y-0.5">
-                  <span className="text-xs font-bold text-[#1d1d1f]">Station CMOD0135</span>
-                  <p className="text-[11px] text-[#86868b]">1.2 km away • CCS2, Type 2, 15A Available</p>
-                </div>
-                <button 
-                  onClick={() => {
-                    setQrInput("CMOD0135");
-                    handleVerify("CMOD0135");
-                  }}
-                  className="bg-apple-accent text-white font-semibold py-1.5 px-3 rounded-full text-xs shadow-md"
-                >
-                  Select
-                </button>
-              </div>
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {nearbyChargers.length === 0 && !isMapLoading ? (
+                <p className="text-xs text-[#86868b] text-center py-4 font-light">No chargers found within 30 km radius.</p>
+              ) : (
+                nearbyChargers.map(cp => (
+                  <div key={cp.identity} className="glass-light p-4 rounded-2xl flex items-start justify-between border-black/5 transition hover:bg-black/5">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-bold text-[#1d1d1f]">{cp.chargerName || cp.identity}</span>
+                      <p className="text-[11px] text-[#86868b] truncate max-w-[180px]">{cp.locationName || 'Unknown Location'}</p>
+                      <div className="flex items-center space-x-1.5 mt-1">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-apple-emerald animate-pulse"></span>
+                        <span className="text-[10px] text-apple-emerald font-bold">
+                          {cp.distance ? `${cp.distance.toFixed(1)} km away` : 'Nearby'}
+                        </span>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setQrInput(cp.identity);
+                        handleVerify(cp.identity);
+                      }}
+                      className="bg-[#007aff] hover:bg-opacity-90 text-white font-semibold py-1.5 px-3 rounded-full text-xs shadow-md select-none cursor-pointer"
+                    >
+                      Select
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

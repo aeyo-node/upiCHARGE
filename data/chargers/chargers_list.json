@@ -1,18 +1,135 @@
 {
   "chargepoints": [
     {
-      "identity": "5001",
-      "chargerName": "Yahoo 60kW",
-      "locationName": "ALPHA EVCS YAHOO SUPER BAZZAR",
-      "locationId": 1695737760992,
+      "identity": "CMOD0272",
+      "chargerName": " DD Diamond Private | Type 2 ",
+      "locationName": " DD Diamond Valley | Private ",
+      "locationId": 1773749531320,
       "geoLocation": {
         "type": "Point",
         "coordinates": [
-          76.90492,
-          8.51093
+          76.374166,
+          10.020106
+        ]
+      }
+    },
+    {
+      "identity": "CMOD0052",
+      "chargerName": "Plug In 60kW",
+      "locationName": " Plugin EVCS",
+      "locationId": 1715060780588,
+      "geoLocation": {
+        "type": "Point",
+        "coordinates": [
+          76.257683,
+          10.476775
+        ]
+      }
+    },
+    {
+      "identity": "CMOD0288",
+      "chargerName": "PulseX | AC Hybrid",
+      "locationName": " PulseX Charging EVCS | COIMBATORE",
+      "locationId": 1776751786178,
+      "geoLocation": {
+        "type": "Point",
+        "coordinates": [
+          76.949692,
+          10.985219
+        ]
+      }
+    },
+    {
+      "identity": "CMOD0195",
+      "chargerName": " PulseX |30kW | CCS2",
+      "locationName": " PulseX Charging Private\u00a0Limited |  NATTAMANGALAM ",
+      "locationId": 1758951643512,
+      "geoLocation": {
+        "type": "Point",
+        "coordinates": [
+          77.787935,
+          11.754666
+        ]
+      }
+    },
+    {
+      "identity": "CMOD0273",
+      "chargerName": "Vishu shopping mall | CCS-2 | 30kW ",
+      "locationName": " Vishnu Shopping Mall EVCS | Nalgonda",
+      "locationId": 1773817800330,
+      "geoLocation": {
+        "type": "Point",
+        "coordinates": [
+          78.98174,
+          16.712402
+        ]
+      }
+    },
+    {
+      "identity": "CMOD0303",
+      "chargerName": "CHARGE KADAI | DC 90kW | CCS-2",
+      "locationName": "90kW | CHARGE KADAI  EVCS |  Pattikkad",
+      "locationId": 1778776315484,
+      "geoLocation": {
+        "type": "Point",
+        "coordinates": [
+          76.342496,
+          10.559457
+        ]
+      }
+    },
+    {
+      "identity": "CMOD0251",
+      "chargerName": "Caritas Hospital | DC 90kW | CCS2",
+      "locationName": "90kW | Caritas Hospital EVCS | Thellakom",
+      "locationId": 1769681689570,
+      "geoLocation": {
+        "type": "Point",
+        "coordinates": [
+          76.549764,
+          9.64324
+        ]
+      }
+    },
+    {
+      "identity": "CMOD0295",
+      "chargerName": "GREENVEEL 002| DC 90kW | CCS-2",
+      "locationName": "90kW | GREENVEEL | KAKKANAD 002",
+      "locationId": 1777704971580,
+      "geoLocation": {
+        "type": "Point",
+        "coordinates": [
+          76.362249,
+          10.015782
+        ]
+      }
+    },
+    {
+      "identity": "CMOD0296",
+      "chargerName": "GREENVEEL 003 | DC 90kW | CCS-2",
+      "locationName": "90kW | GREENVEEL | KAKKANAD 003",
+      "locationId": 1777707033539,
+      "geoLocation": {
+        "type": "Point",
+        "coordinates": [
+          76.363149,
+          10.017331
+        ]
+      }
+    },
+    {
+      "identity": "cmod0197",
+      "chargerName": "Qwik Volt | 90kW | CCS2",
+      "locationName": "90kW | Qwik Volt EVCS | Kothanalloor",
+      "locationId": 1759132499955,
+      "geoLocation": {
+        "type": "Point",
+        "coordinates": [
+          76.52519,
+          9.718976
         ]
       }
     }
   ],
-  "count": 1
+  "count": 287
 }

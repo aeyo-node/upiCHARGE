@@ -1,0 +1,21 @@
+{
+  "user_chats": {
+    "test_usr_1234": {
+      "user_id": "test_usr_1234",
+      "user_name": "Test Client",
+      "updated_at": "2026-06-05T14:12:25.367155+00:00",
+      "messages": [
+        {
+          "sender": "user",
+          "text": "Hello, my charger CMOD0135 is not starting up. Please assist.",
+          "timestamp": "2026-06-05T14:12:19.223281+00:00"
+        },
+        {
+          "sender": "admin",
+          "text": "Hello Test Client! We have force-started CMOD0135 from our end. Please verify.",
+          "timestamp": "2026-06-05T14:12:25.367138+00:00"
+        }
+      ]
+    }
+  }
+}

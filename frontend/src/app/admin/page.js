@@ -24,7 +24,8 @@ import {
   Loader2,
   Trash2,
   HelpCircle,
-  Cpu
+  Cpu,
+  MessageSquare
 } from "lucide-react";
 
 export default function AdminDashboard() {
@@ -58,8 +59,112 @@ export default function AdminDashboard() {
   const [errorMsg, setErrorMsg] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Support chat states
+  const [supportChats, setSupportChats] = useState([]);
+  const [selectedChatId, setSelectedChatId] = useState("");
+  const [selectedChatMessages, setSelectedChatMessages] = useState([]);
+  const [chatReplyText, setChatReplyText] = useState("");
+  const [isReplySending, setIsReplySending] = useState(false);
+  const adminChatEndRef = useRef(null);
+
   // Auto poll ref
   const pollIntervalRef = useRef(null);
+
+  // Poll support chats list from backend when active tab is "chats"
+  useEffect(() => {
+    if (activeTab !== "chats" || !apiBase) return;
+
+    const fetchSupportChats = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/admin/support/chats`);
+        if (res.ok) {
+          const data = await res.json();
+          setSupportChats(data);
+        }
+      } catch (err) {
+        console.error("Error fetching support chats:", err);
+      }
+    };
+
+    fetchSupportChats();
+    const interval = setInterval(fetchSupportChats, 4000);
+    return () => clearInterval(interval);
+  }, [activeTab, apiBase]);
+
+  // Poll historical messages for selected chat
+  useEffect(() => {
+    if (activeTab !== "chats" || !selectedChatId || !apiBase) {
+      setSelectedChatMessages([]);
+      return;
+    }
+
+    const fetchSelectedChatMessages = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/support/history/${selectedChatId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSelectedChatMessages(data);
+        }
+      } catch (err) {
+        console.error("Error fetching selected chat history:", err);
+      }
+    };
+
+    fetchSelectedChatMessages();
+    const interval = setInterval(fetchSelectedChatMessages, 4000);
+    return () => clearInterval(interval);
+  }, [activeTab, selectedChatId, apiBase]);
+
+  // Auto-scroll admin chat to bottom when selected chat or chat list updates
+  useEffect(() => {
+    if (activeTab === "chats" && adminChatEndRef.current) {
+      adminChatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [selectedChatMessages, selectedChatId, activeTab]);
+
+  const handleSendAdminReply = async (e) => {
+    e.preventDefault();
+    if (!chatReplyText.trim() || isReplySending || !selectedChatId) return;
+
+    const text = chatReplyText.trim();
+    setChatReplyText("");
+    setIsReplySending(true);
+
+    // Optimistic UI update
+    const optimisticMsg = {
+      sender: "admin",
+      text: text,
+      timestamp: new Date().toISOString()
+    };
+    setSelectedChatMessages(prev => [...prev, optimisticMsg]);
+
+    try {
+      const res = await fetch(`${apiBase}/api/admin/support/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: selectedChatId,
+          text: text
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.chat && data.chat.messages) {
+          setSelectedChatMessages(data.chat.messages);
+        }
+        // Force refresh supportChats metadata list
+        const chatsRes = await fetch(`${apiBase}/api/admin/support/chats`);
+        if (chatsRes.ok) {
+          const chatsData = await chatsRes.json();
+          setSupportChats(chatsData);
+        }
+      }
+    } catch (err) {
+      console.error("Error sending admin reply:", err);
+    } finally {
+      setIsReplySending(false);
+    }
+  };
 
   // Initialize API Base
   useEffect(() => {
@@ -416,6 +521,7 @@ export default function AdminDashboard() {
           { id: "sessions", label: "Active Sessions & Stops", icon: Zap },
           { id: "start", label: "Remote Start Terminal", icon: Cpu },
           { id: "transactions", label: "Transaction Ledger", icon: Database },
+          { id: "chats", label: "Support Live Chat", icon: MessageSquare },
           { id: "config", label: "Payment Mode Setup", icon: Settings }
         ].map((tab) => {
           const Icon = tab.icon;
@@ -911,6 +1017,174 @@ export default function AdminDashboard() {
               <ShieldCheck className="h-4 w-4 text-apple-emerald" />
               <span>Saves securely to .env file on FastAPI. Auto-reloads in-memory variables.</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= TAB 5: SUPPORT LIVE CHAT ================= */}
+      {activeTab === "chats" && (
+        <div className="grid md:grid-cols-12 gap-6 h-[calc(100vh-220px)] min-h-[500px] animate-fadeIn">
+          {/* Left Column: Chat Sessions List */}
+          <div className="md:col-span-4 glass rounded-[28px] p-5 flex flex-col h-full border border-black/5 shadow-sm overflow-hidden">
+            <div className="pb-3 border-b border-black/5 mb-3 flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#86868b]">Active Sessions</h3>
+              <span className="text-[10px] bg-[#e07a2c]/10 text-[#e07a2c] px-2 py-0.5 rounded-full font-bold">
+                {supportChats.length} Active
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {supportChats.length === 0 ? (
+                <div className="text-center py-12 text-xs text-[#86868b] font-light">
+                  No active support chats found.
+                </div>
+              ) : (
+                supportChats.map((chat) => {
+                  const isSelected = selectedChatId === chat.user_id;
+                  return (
+                    <button
+                      key={chat.user_id}
+                      onClick={() => setSelectedChatId(chat.user_id)}
+                      className={`w-full text-left p-4 rounded-2xl border transition flex flex-col justify-between relative ${
+                        isSelected
+                          ? "bg-[#e07a2c]/10 border-[#e07a2c]/25 shadow-sm"
+                          : "bg-black/5 border-transparent hover:bg-black/10 hover:border-black/5"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-bold text-xs text-[#1d1d1f] truncate max-w-[120px]">
+                          {chat.user_name}
+                        </span>
+                        <span className="text-[9px] text-[#86868b] font-mono">
+                          {chat.user_id.slice(-4).toUpperCase()}
+                        </span>
+                      </div>
+                      
+                      {chat.last_message && (
+                        <p className="text-[11px] text-[#86868b] truncate mt-1.5 font-light leading-snug w-full">
+                          {chat.last_message}
+                        </p>
+                      )}
+                      
+                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-black/5 w-full">
+                        <span className="text-[9px] text-black/30 font-light">
+                          {chat.last_time
+                            ? new Date(chat.last_time).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit"
+                              })
+                            : ""}
+                        </span>
+                        {chat.message_count > 0 && (
+                          <span className="h-4 min-w-[16px] px-1 rounded-full bg-[#e07a2c] text-white text-[8px] font-bold flex items-center justify-center">
+                            {chat.message_count}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Right Column: Chat History & Typing Area */}
+          <div className="md:col-span-8 glass rounded-[28px] p-6 flex flex-col h-full border border-black/5 shadow-sm overflow-hidden">
+            {selectedChatId ? (
+              <>
+                {/* Chat Header */}
+                <div className="pb-3 border-b border-black/5 mb-4 flex items-center justify-between">
+                  <div className="flex items-center space-x-2.5">
+                    <div className="h-8 w-8 rounded-full bg-[#e07a2c]/10 text-[#e07a2c] flex items-center justify-center text-xs font-black">
+                      {supportChats.find(c => c.user_id === selectedChatId)?.user_name?.[0].toUpperCase() || "U"}
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-[#1d1d1f]">
+                        {supportChats.find(c => c.user_id === selectedChatId)?.user_name || "Support Chat"}
+                      </h4>
+                      <p className="text-[9px] text-[#86868b] font-light leading-none">
+                        Active support session • {selectedChatId}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="h-2 w-2 rounded-full bg-apple-emerald animate-pulse" />
+                </div>
+
+                {/* Messages Box */}
+                <div className="flex-1 overflow-y-auto space-y-4 px-1 mb-4 flex flex-col pr-1">
+                  {selectedChatMessages.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-center p-8 text-[#86868b]">
+                      <Loader2 className="h-6 w-6 animate-spin text-[#e07a2c] mb-2" />
+                      <span className="text-xs font-medium">Fetching history...</span>
+                    </div>
+                  ) : (
+                    selectedChatMessages.map((msg, idx) => {
+                      const isAdmin = msg.sender === "admin";
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex flex-col max-w-[75%] ${
+                            isAdmin ? "self-end items-end" : "self-start items-start"
+                          }`}
+                        >
+                          <div
+                            className={`rounded-2xl px-4 py-2.5 text-xs leading-relaxed ${
+                              isAdmin
+                                ? "bg-[#e07a2c] text-white rounded-br-none shadow-sm shadow-[#e07a2c]/10"
+                                : "bg-black/5 text-[#1d1d1f] rounded-bl-none"
+                            }`}
+                          >
+                            {msg.text}
+                          </div>
+                          <span className="text-[9px] text-[#86868b] mt-1.5 px-1 font-light">
+                            {msg.timestamp
+                              ? new Date(msg.timestamp).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit"
+                                })
+                              : ""}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={adminChatEndRef} />
+                </div>
+
+                {/* Reply Typing Box */}
+                <form onSubmit={handleSendAdminReply} className="flex gap-2 border-t border-black/5 pt-4">
+                  <input
+                    type="text"
+                    value={chatReplyText}
+                    onChange={(e) => setChatReplyText(e.target.value)}
+                    placeholder="Type a reply here..."
+                    disabled={isReplySending}
+                    className="flex-1 bg-black/5 border border-black/10 rounded-2xl py-3.5 px-4 text-xs font-medium placeholder-black/30 text-[#1d1d1f]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!chatReplyText.trim() || isReplySending}
+                    className="bg-[#1d1d1f] hover:bg-[#2c2c2e] disabled:bg-[#86868b]/30 text-white font-bold px-6 rounded-2xl text-xs transition active:scale-95 flex items-center justify-center select-none"
+                  >
+                    {isReplySending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <span>Reply</span>
+                    )}
+                  </button>
+                </form>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center p-8 space-y-2">
+                <div className="h-12 w-12 rounded-full bg-[#e07a2c]/10 text-[#e07a2c] flex items-center justify-center mb-1">
+                  <MessageSquare className="h-6 w-6" />
+                </div>
+                <h4 className="font-bold text-sm text-[#1d1d1f]">No Conversation Selected</h4>
+                <p className="text-xs text-[#86868b] max-w-xs leading-relaxed font-light">
+                  Select an active customer session from the left column to view message logs and send operator replies in real-time.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
