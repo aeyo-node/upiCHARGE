@@ -687,6 +687,8 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }
+
   function handleDownloadInvoice(receiptData) {
     const invoiceHtml = `
 <!DOCTYPE html>
