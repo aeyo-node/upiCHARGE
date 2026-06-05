@@ -295,6 +295,7 @@ async def razorpay_webhook(
         payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
         
         payment_id = payment_entity.get("id")
+        order_id = payment_entity.get("order_id")
         amount_paise = payment_entity.get("amount", 0)
         prepaid_amount = float(amount_paise) / 100.0
         
@@ -302,11 +303,37 @@ async def razorpay_webhook(
         
         # Extract metadata passed by frontend during checkout notes
         charger_id = notes.get("charger_id") or notes.get("chargerId")
-        connector_id_raw = notes.get("connector_id") or notes.get("connectorId") or "1"
+        connector_id_raw = notes.get("connector_id") or notes.get("connectorId")
         customer_mobile_raw = notes.get("customer_mobile") or notes.get("phone") or payment_entity.get("contact")
         
+        # FALLBACK: If notes are stripped or charger_id is missing, search local transactions_db.json using order_id
+        if not charger_id and order_id:
+            print(f"[Webhook Process Warning] Notes/charger_id missing in webhook payload! Querying transactions_db.json for order_id: {order_id}")
+            try:
+                data_dir = os.path.join(BASE_DIR, "data")
+                filepath = os.path.join(data_dir, "transactions_db.json")
+                if os.path.exists(filepath):
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        db = json.load(f)
+                    for r in db:
+                        if r.get("order_id") == order_id:
+                            charger_id = r.get("charger_id")
+                            connector_id_raw = r.get("connector_id")
+                            customer_mobile_raw = r.get("customer_mobile") or customer_mobile_raw
+                            print(f"[Webhook Process Success] Successfully recovered transaction from transactions_db.json!")
+                            print(f"  - Recovered charger_id: {charger_id}")
+                            print(f"  - Recovered connector_id: {connector_id_raw}")
+                            print(f"  - Recovered customer_mobile: {customer_mobile_raw}")
+                            break
+            except Exception as lookup_err:
+                print(f"[Webhook Process Error] Local transaction lookup failed: {lookup_err}")
+
         customer_mobile = clean_mobile(customer_mobile_raw)
         
+        # Default connector ID if still not found
+        if not connector_id_raw:
+            connector_id_raw = "1"
+            
         try:
             connector_id = int(connector_id_raw)
         except Exception:
@@ -314,7 +341,8 @@ async def razorpay_webhook(
 
         print(f"[Webhook Process] Parsed checkout notes:")
         print(f"  - Payment ID: {payment_id}")
-        print(f"  - Prepaid Amount: ₹{prepaid_amount}")
+        print(f"  - Order ID: {order_id}")
+        print(f"  - Prepaid Amount: Rs. {prepaid_amount}")
         print(f"  - Charger ID: {charger_id}")
         print(f"  - Connector ID: {connector_id}")
         print(f"  - Mobile: {customer_mobile}")

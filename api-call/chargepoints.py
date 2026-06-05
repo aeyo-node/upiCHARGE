@@ -190,7 +190,19 @@ def rebuild_charger_db():
 # RESOLVE CHARGER
 # ============================
 def resolve_charger(identifier, charger_type=None):
-    identifier = str(identifier).lower()
+    import re
+    identifier_str = str(identifier).lower().strip()
+    
+    # Normalize c b / cb spacing and punctuation (e.g. cb140, c b 140, c.b. 140, cb-140 -> cb 140)
+    identifier_str = re.sub(r'\bc[\s._\-\/]*b[\s._\-\/]*(\d+)', r'cb \1', identifier_str)
+    
+    # Normalize cmod spacing and punctuation (e.g. c.m.o.d. 0135, c m o d 0135, cmod-0135 -> cmod0135)
+    identifier_str = re.sub(r'\bc[\s._\-\/]*m[\s._\-\/]*o[\s._\-\/]*d[\s._\-\/]*(\d+)', r'cmod\1', identifier_str)
+    
+    # Clean up multiple spaces
+    identifier_str = re.sub(r'\s+', ' ', identifier_str).strip()
+    
+    identifier = identifier_str
 
     #  Identity shortcut (typically 15+ digits)
     if identifier.isdigit() and len(identifier) > 10:
