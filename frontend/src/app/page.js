@@ -33,23 +33,13 @@ import {
 // API base is dynamically set inside the Home component state
 
 export default function Home() {
-  const [apiBase, setApiBase] = useState("http://localhost:8000");
+  const apiBase = ""; // Force relative routing everywhere to use the Next.js reverse-proxy.
   const [isDummyMode, setIsDummyMode] = useState(true);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-        setApiBase("http://localhost:8000");
-      } else {
-        setApiBase(window.location.origin);
-      }
-    }
-  }, []);
 
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        const res = await fetch(`${apiBase}/api/payments/config`);
+        const res = await fetch("/api/payments/config");
         if (res.ok) {
           const config = await res.json();
           setIsDummyMode(config.payment_mode !== "live");
@@ -58,10 +48,8 @@ export default function Home() {
         console.error("Failed to fetch payment config:", err);
       }
     };
-    if (apiBase) {
-      fetchConfig();
-    }
-  }, [apiBase]);
+    fetchConfig();
+  }, []);
 
   // State management for screen transition:
   // 'home' | 'connector' | 'payment' | 'charging' | 'receipt' | 'support' | 'map'
