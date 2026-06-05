@@ -72,7 +72,7 @@ export default function Home() {
   const [selectedConnector, setSelectedConnector] = useState(null);
   const [prepaidAmount, setPrepaidAmount] = useState(200);
   const [customAmount, setCustomAmount] = useState("");
-  const [customerMobile, setCustomerMobile] = useState("");
+  const [customerMobile, setCustomerMobile] = useState("+918086477654");
   
   // Charging state feedback
   const [loading, setLoading] = useState(false);
@@ -428,10 +428,7 @@ export default function Home() {
   // Restore charging state on load (Session Persistence!)
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const storedMobile = localStorage.getItem("customer_mobile_number");
-      if (storedMobile) {
-        setCustomerMobile(storedMobile);
-      }
+      setCustomerMobile("+918086477654");
     }
     const savedSession = localStorage.getItem("active_charge_session");
     if (savedSession) {
@@ -439,7 +436,7 @@ export default function Home() {
         const parsed = JSON.parse(savedSession);
         setActiveSession(parsed);
         setChargerId(parsed.charger_id);
-        setCustomerMobile(parsed.customer_mobile);
+        setCustomerMobile(parsed.customer_mobile || "+918086477654");
         setPrepaidAmount(parsed.prepaid_amount);
         setScreen("charging");
       } catch (e) {
@@ -602,22 +599,12 @@ export default function Home() {
 
   // 2. Start Payment pre-authorization loop
   const handleProceedToPayment = () => {
-    if (customerMobile && (customerMobile.trim().length !== 10 || isNaN(customerMobile))) {
-      setErrorErrorMsg("Please enter a valid 10-digit mobile number, or leave it blank.");
-      return;
-    }
     setErrorErrorMsg("");
     setScreen("payment");
   };
 
   // 3. Initiate Charging (Simulated Payment -> Start API)
   const handleStartCharging = async () => {
-    if (customerMobile && (customerMobile.trim().length !== 10 || isNaN(customerMobile))) {
-      setErrorErrorMsg("Please enter a valid 10-digit mobile number or leave it blank.");
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-
     setLoading(true);
     setErrorErrorMsg("");
 
@@ -725,7 +712,7 @@ export default function Home() {
           },
           prefill: {
             contact: finalMobile,
-            email: "customer@upicharge.com",
+            email: "aeyo.node@gmail.com",
             method: 'upi'
           },
           config: {
@@ -1026,41 +1013,6 @@ export default function Home() {
           {/* Combined Prepaid Section - displays instantly when a connector is selected */}
           {selectedConnector && (
             <div className="space-y-6 animate-fadeIn">
-              {/* Mobile Number Entry Card */}
-              <div className="glass rounded-[32px] p-6 space-y-3 relative overflow-hidden border-black/5">
-                <div className="flex items-center space-x-3 mb-1">
-                  <div className="h-8 w-8 bg-apple-accent/10 border border-apple-accent/20 rounded-xl flex items-center justify-center text-apple-accent">
-                    <Smartphone className="h-4 w-4" />
-                  </div>
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] text-apple-accent uppercase tracking-widest font-bold">Checkout Information</span>
-                    <h4 className="font-bold text-sm text-[#1d1d1f] tracking-tight">Customer Mobile Number (Optional)</h4>
-                  </div>
-                </div>
-                
-                <p className="text-xs text-[#86868b] leading-normal font-light">
-                  Provide your 10-digit mobile number for custom receipt delivery, or leave it blank to start an anonymous charging session instantly.
-                </p>
-
-                <div className="relative mt-2">
-                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-sm font-semibold text-[#86868b]">+91</span>
-                  <input 
-                    type="tel" 
-                    maxLength="10"
-                    placeholder="Enter 10-digit mobile number" 
-                    value={customerMobile}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, "");
-                      setCustomerMobile(val);
-                      if (typeof window !== "undefined") {
-                        localStorage.setItem("customer_mobile_number", val);
-                      }
-                    }}
-                    className="w-full bg-black/5 border border-black/5 rounded-2xl py-4 pl-14 pr-5 text-sm font-semibold tracking-wide placeholder-black/30 text-[#1d1d1f]"
-                  />
-                </div>
-              </div>
-
               {/* Prepaid selection section */}
               <div className="space-y-4">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-[#86868b] px-1">Select Prepaid Amount</h3>

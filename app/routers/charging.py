@@ -16,7 +16,7 @@ from chargepoints import fetch_chargepoint_details, resolve_charger
 from auth_key import get_auth_token
 from app.config import get_payment_mode, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
 from RemoteStop import extract_active_tx_metrics, calculate_detailed_billing
-from app.routers.payments import upsert_transaction
+from app.routers.payments import upsert_transaction, clean_mobile
 
 router = APIRouter(prefix="/api/charging", tags=["charging"])
 
@@ -80,6 +80,9 @@ def parse_qr_code(qr_data: str) -> str:
     Parses scanned QR data (either raw like 'CM-CMOD0135-VLEM', a URL, or already clean id).
     """
     qr_data = qr_data.strip()
+    if "?" in qr_data:
+        qr_data = qr_data.split("?")[0]
+        
     if "/" in qr_data:
         parts = [p for p in qr_data.split("/") if p]
         if parts:
@@ -153,17 +156,21 @@ def start_charging(req: StartChargingRequest):
     """
     Triggers actual remote start on chargeMOD using 'skip' OTP mode.
     """
+    cleaned_mobile = clean_mobile(req.customer_mobile)
+    if not cleaned_mobile:
+        cleaned_mobile = "8086477654"
+
     print(f"\n[DEBUG /start] Received start charging request:")
     print(f"  - charger_id: {req.charger_id}")
     print(f"  - connector_id: {req.connector_id}")
-    print(f"  - customer_mobile: {req.customer_mobile}")
+    print(f"  - customer_mobile: {req.customer_mobile} (cleaned: {cleaned_mobile})")
     print(f"  - prepaid_amount: {req.prepaid_amount}")
     
     # Simply call the start sequence with 'skip' so OTP is bypassed
     res = charger_action(
         action="start",
         charger_identity=req.charger_id,
-        customer_mobile=req.customer_mobile,
+        customer_mobile=cleaned_mobile,
         connector_id=req.connector_id,
         otp_method="skip"
     )
@@ -195,7 +202,7 @@ def start_charging(req: StartChargingRequest):
             session_info = {
                 "charger_id": req.charger_id,
                 "connector_id": req.connector_id,
-                "customer_mobile": req.customer_mobile,
+                "customer_mobile": cleaned_mobile,
                 "prepaid_amount": req.prepaid_amount,
                 "start_time": datetime.now(timezone.utc).isoformat()
             }
@@ -211,7 +218,7 @@ def start_charging(req: StartChargingRequest):
                 charging_status="charging",
                 charging_start_time=datetime.now(timezone.utc).isoformat(),
                 charge_mod_tx_id="sim_tx_" + str(int(datetime.now(timezone.utc).timestamp())),
-                customer_mobile=req.customer_mobile,
+                customer_mobile=cleaned_mobile,
                 amount=req.prepaid_amount
             )
         except Exception as sim_err:
