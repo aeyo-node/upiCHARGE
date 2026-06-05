@@ -615,6 +615,7 @@ def stop_charging(req: StopChargingRequest):
                     refund_amount_paise = int(round(refund_amount * 100))
                     refund_data = {
                         "amount": refund_amount_paise,
+                        "speed": "optimum",
                         "notes": {
                             "reason": f"Automatic refund of unused charging prepaid balance for charger {req.charger_id}"
                         }
@@ -636,6 +637,18 @@ def stop_charging(req: StopChargingRequest):
     if active_payment:
         clear_active_payment(req.charger_id)
             
+    # Create an appropriate message
+    if refund_status.startswith("refunded_via_razorpay"):
+        msg = f"Instant refund of Rs. {refund_amount:.2f} initiated successfully."
+    elif refund_status == "no_refund_needed_full_amount_used":
+        msg = "Charging completed. No refund needed."
+    elif refund_status.startswith("razorpay_error"):
+        msg = f"Refund processing failed: please contact support. Error: {refund_status.split(':', 1)[1]}"
+    elif refund_status == "missing_payment_id_for_refund":
+        msg = f"Stop successful, but refund could not be initiated (Missing payment ID)."
+    else:
+        msg = f"Refund of Rs. {refund_amount:.2f} processed (Simulated)."
+
     return {
         "status": "success",
         "charger_id": req.charger_id,
@@ -659,7 +672,7 @@ def stop_charging(req: StopChargingRequest):
             "session_date_formatted": format_date_to_ist(start_time_raw) if start_time_raw else "03 Jun 2026, 09:02 PM"
         },
         "refund_status": refund_status,
-        "message": f"Refund of Rs. {refund_amount:.2f} initiated successfully."
+        "message": msg
     }
 
 

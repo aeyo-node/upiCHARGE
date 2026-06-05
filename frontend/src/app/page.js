@@ -537,8 +537,20 @@ export default function Home() {
     // This stops the camera frame cycle and prevents parallel/re-entrant verify requests
     await stopScanner();
 
+    let cleanCode = inputCode || qrInput;
+    if (cleanCode) {
+      if (cleanCode.includes("upicharge.com/")) {
+        cleanCode = cleanCode.split("upicharge.com/").pop().replace(/\/$/, '');
+      } else if (cleanCode.includes("chargemod.com/")) {
+        cleanCode = cleanCode.split("chargemod.com/").pop().replace(/\/$/, '');
+      } else if (cleanCode.includes("http")) {
+        const urlParts = cleanCode.split("/");
+        cleanCode = urlParts[urlParts.length - 1] || urlParts[urlParts.length - 2];
+      }
+    }
+
     try {
-      const res = await fetch(`${apiBase}/api/charging/verify-station/${encodeURIComponent(inputCode || qrInput)}`);
+      const res = await fetch(`${apiBase}/api/charging/verify-station/${encodeURIComponent(cleanCode)}`);
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.detail || "Charger verification failed.");
