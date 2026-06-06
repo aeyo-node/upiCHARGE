@@ -1,0 +1,176 @@
+{
+  "chargerName": "KSEB13 CB 130 Mahe",
+  "identity": "866029038276184",
+  "chargerId": "222",
+  "locationId": 222,
+  "chargePointConnectionProtocol": "MQTT",
+  "stationType": "AC",
+  "maintenanceStatus": "light",
+  "isFree": null,
+  "featureDetails": [
+    {
+      "name": "QR Code",
+      "description": "This charger can authenticate through QR code method"
+    }
+  ],
+  "oem": {
+    "oemName": "chargeMOD"
+  },
+  "device": {
+    "deviceName": "BlackBox"
+  },
+  "available": false,
+  "evses": [
+    {
+      "status": "Active",
+      "connectorStatus": "Disconnected",
+      "connectorErrCode": "Network disconnection",
+      "connectorId": 1,
+      "physicalReference": "Socket",
+      "maxOutputPower": 3.3,
+      "connectors": {
+        "name": "6/16A Socket",
+        "powerType": "AC_1_PHASE",
+        "maxVoltage": 240,
+        "maxAmperage": 16,
+        "maxElectricPower": 3300
+      },
+      "newTariff": {
+        "connectorId": 1,
+        "tariff": {
+          "deductiveType": "KSEB AC",
+          "baseDeductiveAmount": 0.0001,
+          "extraDeductiveAmount": 9,
+          "vat": 18,
+          "isTimeBasedTariff": true,
+          "hourlyTariffBreakdown": {
+            "allday": {
+              "00:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "01:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "02:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "03:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "04:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "05:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "06:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "07:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "08:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "09:00": {
+                "base": 0.0001,
+                "extra": 8.5,
+                "vat": 18
+              },
+              "10:00": {
+                "base": 0.0001,
+                "extra": 8.5,
+                "vat": 18
+              },
+              "11:00": {
+                "base": 0.0001,
+                "extra": 8.5,
+                "vat": 18
+              },
+              "12:00": {
+                "base": 0.0001,
+                "extra": 8.5,
+                "vat": 18
+              },
+              "13:00": {
+                "base": 0.0001,
+                "extra": 8.5,
+                "vat": 18
+              },
+              "14:00": {
+                "base": 0.0001,
+                "extra": 8.5,
+                "vat": 18
+              },
+              "15:00": {
+                "base": 0.0001,
+                "extra": 8.5,
+                "vat": 18
+              },
+              "16:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "17:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "18:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "19:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "20:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "21:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "22:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              },
+              "23:00": {
+                "base": 0.0001,
+                "extra": 14.23,
+                "vat": 18
+              }
+            }
+          },
+          "isSameForAllDay": true
+        }
+      }
+    }
+  ],
+  "tariff": []
+}

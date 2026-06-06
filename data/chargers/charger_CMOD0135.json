@@ -35,7 +35,7 @@
   "evses": [
     {
       "status": "Active",
-      "connectorStatus": "Charging",
+      "connectorStatus": "Available",
       "connectorErrCode": "NoError",
       "connectorId": 1,
       "physicalReference": "Gun 1",
@@ -182,7 +182,7 @@
     },
     {
       "status": "Active",
-      "connectorStatus": "Charging",
+      "connectorStatus": "Available",
       "connectorErrCode": "NoError",
       "connectorId": 2,
       "physicalReference": "Gun 2",

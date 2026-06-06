@@ -554,10 +554,17 @@ def start_charging(req: StartChargingRequest):
                         detail=f"AC Charger connector {req.connector_id} must be 'Available' to start (current status: {status})."
                     )
                 
-                if is_dc and status.upper() != "PREPARING":
+                # Exception: test charger 185599798823820 can start from Available
+                TEST_CHARGER_ID = "185599798823820"
+                if is_dc and req.charger_id != TEST_CHARGER_ID and status.upper() != "PREPARING":
                     raise HTTPException(
                         status_code=400,
                         detail=f"DC Fast Charger connector {req.connector_id} must be 'Preparing' (gun connected) to start (current status: {status})."
+                    )
+                if is_dc and req.charger_id == TEST_CHARGER_ID and status.upper() not in ("PREPARING", "AVAILABLE"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Test charger connector {req.connector_id} must be 'Available' or 'Preparing' to start (current status: {status})."
                     )
     except HTTPException:
         raise

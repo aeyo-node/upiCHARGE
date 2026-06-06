@@ -1,18 +1,4 @@
 {
-  "chargepoints": [
-    {
-      "identity": "CMOD0135",
-      "chargerName": "Akshaya | 60kW",
-      "locationName": "Akshaya EVCS | Kazhakkoottam",
-      "locationId": 1744992510651,
-      "geoLocation": {
-        "type": "Point",
-        "coordinates": [
-          76.874478,
-          8.565411
-        ]
-      }
-    }
-  ],
-  "count": 1
+  "chargepoints": [],
+  "count": 0
 }

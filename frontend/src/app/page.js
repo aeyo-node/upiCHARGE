@@ -90,9 +90,12 @@ export default function Home() {
 
   const isDC = selectedConnector ? isDCConnector(selectedConnector) : false;
   const isAC = selectedConnector ? !isDC : false;
+  const TEST_CHARGER_ID = "185599798823820";
+  const isTestCharger = chargerId === TEST_CHARGER_ID;
   const isReadyToStart = selectedConnector && (
     (isAC && selectedConnector.status === "Available") ||
-    (isDC && selectedConnector.status === "Preparing")
+    (isDC && selectedConnector.status === "Preparing") ||
+    (isDC && isTestCharger && selectedConnector.status === "Available")
   );
 
   useEffect(() => {
@@ -1421,9 +1424,14 @@ export default function Home() {
                     ⚠️ Kindly connect the charger before payment
                   </div>
                 )}
-                {isDC && selectedConnector && selectedConnector.status === "Available" && (
+                {isDC && !isTestCharger && selectedConnector && selectedConnector.status === "Available" && (
                   <div className="p-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl text-xs font-semibold text-center">
                     ⚠️ Gun not connected. Please connect the gun before payment
+                  </div>
+                )}
+                {isDC && isTestCharger && selectedConnector && selectedConnector.status === "Available" && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-2xl text-xs font-semibold text-center">
+                    🔧 Test charger — ready to start from Available.
                   </div>
                 )}
                 {isDC && selectedConnector && selectedConnector.status === "Preparing" && (

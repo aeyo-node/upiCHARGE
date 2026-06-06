@@ -1,0 +1,23 @@
+[
+  {
+    "order_id": null,
+    "payment_id": null,
+    "charger_id": "mock_charger_123",
+    "connector_id": 1,
+    "amount": 50.0,
+    "customer_mobile": "8086477654",
+    "status": "captured",
+    "created_at": "2026-06-06T08:28:15.710371+00:00",
+    "captured_at": "2026-06-06T08:28:15.706664+00:00",
+    "charging_status": "stopped",
+    "charging_start_time": "2026-06-06T08:28:15.706708+00:00",
+    "charging_stop_time": "2026-06-06T08:28:41.349396+00:00",
+    "charge_mod_tx_id": "sim_tx_1780734495",
+    "energy_kwh": 0.38,
+    "cost_rs": 18.44,
+    "refund_status": "simulated",
+    "refund_amount": 31.56,
+    "refund_id": null,
+    "refunded_at": "2026-06-06T08:28:41.349829+00:00"
+  }
+]
