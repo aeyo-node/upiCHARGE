@@ -128,6 +128,46 @@ def get_charger_max_power(charger_id: str) -> float:
         return 3.3
     return 7.4
 
+def get_charger_tariff(charger_id: str) -> dict:
+    """
+    Attempts to read tariff details from cached charger file.
+    Returns: { "base": float, "unit_rate": float, "vat": float, "is_time_based": bool }
+    """
+    res = {
+        "base": 0.0,
+        "unit_rate": 15.0,
+        "vat": 18.0,
+        "is_time_based": False
+    }
+    try:
+        import os
+        import json
+        filepath = os.path.join(BASE_DIR, "data", "chargers", f"charger_{charger_id}.json")
+        if os.path.exists(filepath):
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # Try to get tariff from the first connector's newTariff
+            evses = data.get("evses", [])
+            if evses:
+                evse = evses[0]
+                new_tariff = evse.get("newTariff", {}).get("tariff") or {}
+                if new_tariff:
+                    res["base"] = float(new_tariff.get("baseDeductiveAmount") or 0.0)
+                    res["unit_rate"] = float(new_tariff.get("extraDeductiveAmount") or 15.0)
+                    res["vat"] = float(new_tariff.get("vat") or 18.0)
+                    res["is_time_based"] = bool(new_tariff.get("isTimeBasedTariff", False))
+                    return res
+            # Fallback to general tariff list
+            tariff_list = data.get("tariff", [])
+            if tariff_list:
+                t = tariff_list[0]
+                res["base"] = float(t.get("baseDeductiveAmount") or 0.0)
+                res["unit_rate"] = float(t.get("extraDeductiveAmount") or 15.0)
+                res["vat"] = float(t.get("vat") or 18.0)
+    except Exception as e:
+        print(f"[get_charger_tariff] Error reading tariff for charger {charger_id}: {e}")
+    return res
+
 def generate_live_telemetry(charger_id: str, elapsed_seconds: int, prepaid_limit: float) -> dict:
     import math
     import random
@@ -160,18 +200,23 @@ def generate_live_telemetry(charger_id: str, elapsed_seconds: int, prepaid_limit
     energy_kwh = (avg_power * elapsed_seconds) / 3600.0
     
     # 3. Running cost calculation matching our tariff structure:
-    # Tariff: Rs. 15 per kWh + flat Rs. 10 base service fee + 18% GST tax
-    energy_cost = energy_kwh * 15.0
-    service_fee = 10.0
-    tax_percentage = 18.0
+    tariff = get_charger_tariff(charger_id)
+    service_fee = tariff["base"]
+    unit_rate = tariff["unit_rate"]
+    tax_percentage = tariff["vat"]
+    
+    energy_cost = energy_kwh * unit_rate
     tax_amount = (energy_cost + service_fee) * (tax_percentage / 100.0)
     total_cost = energy_cost + service_fee + tax_amount
     
     # Ensure we never exceed the prepaid limit!
     if total_cost >= prepaid_limit:
         total_cost = prepaid_limit
-        energy_kwh = max(0.0, (prepaid_limit / 1.18 - 10.0) / 15.0)
-        energy_cost = energy_kwh * 15.0
+        if unit_rate > 0.0:
+            energy_kwh = max(0.0, (prepaid_limit / (1.0 + tax_percentage / 100.0) - service_fee) / unit_rate)
+        else:
+            energy_kwh = 0.0
+        energy_cost = energy_kwh * unit_rate
         tax_amount = prepaid_limit - energy_cost - service_fee
         # Shut down physical power representation
         power_kw = 0.0
@@ -749,7 +794,10 @@ def get_charging_status(charger_id: str):
             try:
                 from RemoteStop import get_available_connectors
                 connectors, _ = get_available_connectors(charger_id)
-                if connectors and any(c.get("status") in ["Charging", "Preparing"] for c in connectors):
+                chk_statuses = ["Charging", "Preparing"]
+                if str(charger_id).strip() == "185599798823820":
+                    chk_statuses.append("Available")
+                if connectors and any(c.get("status") in chk_statuses for c in connectors):
                     elapsed_seconds = 0
                     prepaid_limit = 200.0
                     start_time_raw = None
@@ -816,6 +864,8 @@ def get_charging_status(charger_id: str):
             connectors, _ = get_available_connectors(charger_id)
             if connectors:
                 active_statuses = ["Charging", "Preparing", "SuspendedEV", "SuspendedEVSE"]
+                if str(charger_id).strip() == "185599798823820":
+                    active_statuses.append("Available")
                 if not any(c.get("status") in active_statuses for c in connectors):
                     print(f"[status] Active transaction found in scraper, but physical connectors are inactive: {connectors}. Marking active: False.")
                     statuses_str = ", ".join(f"Gun {c.get('id')}: {c.get('status')}" for c in connectors)
@@ -914,18 +964,25 @@ def stop_charging(req: StopChargingRequest):
             dt_start = datetime.fromisoformat(start_time_raw.replace("Z", "+00:00"))
             elapsed_seconds = int((datetime.now(timezone.utc) - dt_start).total_seconds())
             
+            charger_id = sim_data.get("charger_id", req.charger_id)
+            tariff = get_charger_tariff(charger_id)
+            service_fee = tariff["base"]
+            unit_rate = tariff["unit_rate"]
+            tax_percentage = tariff["vat"]
+
             energy_kwh = elapsed_seconds * 0.015
-            energy_cost = energy_kwh * 15.0
-            service_fee = 10.0
-            tax_percentage = 18.0
+            energy_cost = energy_kwh * unit_rate
             tax_amount = (energy_cost + service_fee) * (tax_percentage / 100.0)
             total_cost = energy_cost + service_fee + tax_amount
             
             prepaid_limit = float(sim_data.get("prepaid_amount") or req.prepaid_amount)
             if total_cost >= prepaid_limit:
                 total_cost = prepaid_limit
-                energy_kwh = max(0.0, (prepaid_limit / 1.18 - 10.0) / 15.0)
-                energy_cost = energy_kwh * 15.0
+                if unit_rate > 0.0:
+                    energy_kwh = max(0.0, (prepaid_limit / (1.0 + tax_percentage / 100.0) - service_fee) / unit_rate)
+                else:
+                    energy_kwh = 0.0
+                energy_cost = energy_kwh * unit_rate
                 tax_amount = prepaid_limit - energy_cost - service_fee
                 
             billing = {
