@@ -59,6 +59,15 @@ input:focus {
   animation: pulse-glow 2.5s infinite;
 }
 
+@keyframes warning-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.15; }
+}
+
+.animate-warning-blink {
+  animation: warning-blink 1.2s infinite;
+}
+
 /* Hide standard HTML scrollbars */
 ::-webkit-scrollbar {
   width: 6px;

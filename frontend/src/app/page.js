@@ -79,7 +79,21 @@ export default function Home() {
   const scannerRef = useRef(null);
   const scannerInstance = useRef(null);
   const inactivePollsRef = useRef(0);
-  const verifyingRef = useRef(false);
+  const verifyingRef = useRef(false);  const isDCConnector = (con) => {
+    if (!con) return false;
+    const powerType = (con.power_type || "").toUpperCase();
+    const conType = (con.type || "").toUpperCase();
+    const label = (con.gun_label || "").toUpperCase();
+    const maxPower = parseFloat(con.max_power_kw) || 0;
+    return powerType.includes("DC") || conType.includes("DC") || label.includes("DC") || maxPower > 22;
+  };
+
+  const isDC = selectedConnector ? isDCConnector(selectedConnector) : false;
+  const isAC = selectedConnector ? !isDC : false;
+  const isReadyToStart = selectedConnector && (
+    (isAC && selectedConnector.status === "Available") ||
+    (isDC && selectedConnector.status === "Preparing")
+  );
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -632,7 +646,10 @@ export default function Home() {
           prepaid_amount: finalPrepaid,
           energy_kwh: 0,
           cost_rs: 0,
-          elapsed_seconds: 0
+          elapsed_seconds: 0,
+          power_kw: 0,
+          voltage_v: 0,
+          current_a: 0
         };
 
         localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
@@ -660,7 +677,10 @@ export default function Home() {
               prepaid_amount: finalPrepaid,
               energy_kwh: 0,
               cost_rs: 0,
-              elapsed_seconds: 0
+              elapsed_seconds: 0,
+              power_kw: 0,
+              voltage_v: 0,
+              current_a: 0
             };
             localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
             setActiveSession(initialSession);
@@ -1025,6 +1045,42 @@ export default function Home() {
     }
   }, []);
 
+  // Set up background status polling for connectors when in 'connector' screen
+  useEffect(() => {
+    let interval = null;
+    
+    if (screen === "connector" && stationDetails?.charger_id) {
+      const fetchLatestConnectorStatus = async () => {
+        try {
+          const res = await fetch(`${apiBase}/api/charging/verify-station/${encodeURIComponent(stationDetails.charger_id)}`);
+          if (!res.ok) return;
+          const data = await res.json();
+          
+          setStationDetails(data);
+          
+          // Also keep the selected connector status in sync
+          if (selectedConnector) {
+            const updated = data.connectors.find(
+              c => c.connector_id === selectedConnector.connector_id
+            );
+            if (updated) {
+              setSelectedConnector(updated);
+            }
+          }
+        } catch (err) {
+          console.error("Error polling connector status:", err);
+        }
+      };
+
+      fetchLatestConnectorStatus();
+      interval = setInterval(fetchLatestConnectorStatus, 4000);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [screen, stationDetails?.charger_id, selectedConnector]);
+
   // Set up background status polling when in 'charging' screen
   useEffect(() => {
     let interval = null;
@@ -1050,7 +1106,10 @@ export default function Home() {
               ...prev,
               energy_kwh: data.energy_kwh,
               cost_rs: data.cost_rs,
-              elapsed_seconds: data.elapsed_seconds
+              elapsed_seconds: data.elapsed_seconds,
+              power_kw: data.power_kw,
+              voltage_v: data.voltage_v,
+              current_a: data.current_a
             }));
           }
         } catch (err) {
@@ -1356,22 +1415,51 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* Notices / Warnings */}
+                {isAC && selectedConnector && selectedConnector.status === "Available" && (
+                  <div className="p-3 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-xs font-semibold text-center animate-warning-blink">
+                    ⚠️ Kindly connect the charger before payment
+                  </div>
+                )}
+                {isDC && selectedConnector && selectedConnector.status === "Available" && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl text-xs font-semibold text-center">
+                    ⚠️ Gun not connected. Please connect the gun before payment
+                  </div>
+                )}
+                {isDC && selectedConnector && selectedConnector.status === "Preparing" && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-2xl text-xs font-semibold text-center animate-pulse-slow">
+                    ✅ Gun connected! Ready to pay and start.
+                  </div>
+                )}
+                {selectedConnector && selectedConnector.status !== "Available" && selectedConnector.status !== "Preparing" && (
+                  <div className="p-3 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-xs font-semibold text-center">
+                    ⚠️ Connector {selectedConnector.connector_id} is {selectedConnector.status}. Cannot start charging.
+                  </div>
+                )}
+
                 {/* Checkout / Payment CTA Button */}
                 <button 
                   onClick={handleStartCharging}
-                  disabled={loading}
+                  disabled={loading || !isReadyToStart}
                   className={`w-full font-bold py-4 rounded-2xl shadow-lg transition active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2 text-sm ${
-                    isDummyMode 
-                      ? "bg-apple-emerald text-black shadow-apple-emerald/20 glow-emerald" 
-                      : "bg-[#e07a2c] text-white shadow-orange-500/20"
+                    !isReadyToStart
+                      ? "bg-gray-200 text-[#86868b] border border-black/5 shadow-none cursor-not-allowed"
+                      : isDummyMode 
+                        ? "bg-apple-emerald text-black shadow-apple-emerald/20 glow-emerald" 
+                        : "bg-[#e07a2c] text-white shadow-orange-500/20"
                   }`}
                 >
                   {loading ? (
                     <Loader2 className={`h-5 w-5 animate-spin ${isDummyMode ? "text-black" : "text-white"}`} />
                   ) : (
                     <>
-                      <Sparkles className={`h-4 w-4 ${isDummyMode ? "text-black" : "text-white"}`} />
-                      <span>{isDummyMode ? "Simulate Payment & Start Charging" : "Pay & Start Charging"}</span>
+                      <Sparkles className={`h-4 w-4 ${isReadyToStart ? (isDummyMode ? "text-black" : "text-white") : "text-gray-400"}`} />
+                      <span>
+                        {!isReadyToStart 
+                          ? (isDC && selectedConnector.status === "Available" ? "Gun Not Connected" : "Charger Unavailable")
+                          : (isDummyMode ? "Simulate Payment & Start Charging" : "Pay & Start Charging")
+                        }
+                      </span>
                     </>
                   )}
                 </button>
@@ -1434,6 +1522,36 @@ export default function Home() {
               </div>
               <span className="text-2xl font-bold tracking-tight text-[#1d1d1f] mt-1">
                 ₹{activeSession.prepaid_amount}
+              </span>
+            </div>
+          </div>
+
+          {/* Live Telemetry Gauges */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="glass rounded-2xl p-4 flex flex-col items-center justify-center border-black/5 text-center">
+              <span className="text-[10px] font-bold text-[#86868b] uppercase tracking-wider">
+                Voltage
+              </span>
+              <span className="text-lg font-extrabold text-[#1d1d1f] tracking-tight mt-1">
+                {activeSession.voltage_v ? `${Number(activeSession.voltage_v).toFixed(1)} V` : "0.0 V"}
+              </span>
+            </div>
+
+            <div className="glass rounded-2xl p-4 flex flex-col items-center justify-center border-black/5 text-center">
+              <span className="text-[10px] font-bold text-[#86868b] uppercase tracking-wider">
+                Current
+              </span>
+              <span className="text-lg font-extrabold text-[#1d1d1f] tracking-tight mt-1">
+                {activeSession.current_a ? `${Number(activeSession.current_a).toFixed(1)} A` : "0.0 A"}
+              </span>
+            </div>
+
+            <div className="glass rounded-2xl p-4 flex flex-col items-center justify-center border-black/5 text-center">
+              <span className="text-[10px] font-bold text-[#86868b] uppercase tracking-wider">
+                Power
+              </span>
+              <span className="text-lg font-extrabold text-apple-emerald tracking-tight mt-1">
+                {activeSession.power_kw ? `${Number(activeSession.power_kw).toFixed(2)} kW` : "0.00 kW"}
               </span>
             </div>
           </div>

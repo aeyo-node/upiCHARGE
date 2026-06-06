@@ -517,6 +517,59 @@ def start_charging(req: StartChargingRequest):
     print(f"  - customer_mobile: {req.customer_mobile} (cleaned: {cleaned_mobile})")
     print(f"  - prepaid_amount: {req.prepaid_amount}")
     
+    # Fetch physical connector status to enforce safety rules
+    try:
+        details = fetch_chargepoint_details(req.charger_id)
+        if details:
+            target_connector = None
+            for evse in details.get("evses", []):
+                if evse.get("connectorId") == req.connector_id:
+                    target_connector = evse
+                    break
+            
+            if target_connector:
+                status = target_connector.get("connectorStatus", target_connector.get("status", "Unknown"))
+                # Get connector type to decide whether it is AC or DC
+                cons = target_connector.get("connectors", {})
+                if isinstance(cons, list) and len(cons) > 0:
+                    cons = cons[0]
+                elif not isinstance(cons, dict):
+                    cons = {}
+                
+                con_type = str(cons.get("name", "Unknown")).upper()
+                power_type = str(cons.get("powerType", "Unknown")).upper()
+                max_power = float(target_connector.get("maxOutputPower") or 0.0)
+                is_dc = "DC" in power_type or "DC" in con_type or "CCS" in con_type or "CHA" in con_type or max_power > 22.0
+                is_ac = not is_dc
+                
+                if status.upper() == "DISCONNECTED":
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot start charging. Connector {req.connector_id} is disconnected."
+                    )
+                
+                if is_ac and status.upper() != "AVAILABLE":
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"AC Charger connector {req.connector_id} must be 'Available' to start (current status: {status})."
+                    )
+                
+                if is_dc and status.upper() != "PREPARING":
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"DC Fast Charger connector {req.connector_id} must be 'Preparing' (gun connected) to start (current status: {status})."
+                    )
+    except HTTPException:
+        raise
+    except Exception as check_err:
+        print(f"[start-status-check] Error performing pre-start status check: {check_err}")
+        # In dummy mode, we can bypass if fetch fails, but in live mode we must block
+        if get_payment_mode() != "dummy":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to verify charger connection status: {check_err}"
+            )
+            
     # Simply call the start sequence with 'skip' so OTP is bypassed
     res = charger_action(
         action="start",
@@ -602,46 +655,28 @@ def get_charging_status(charger_id: str):
                 dt_start = datetime.fromisoformat(start_time_raw.replace("Z", "+00:00"))
                 elapsed_seconds = int((datetime.now(timezone.utc) - dt_start).total_seconds())
                 
-                # Simulating increments: 0.015 kWh/sec (approx 54kW charging rate)
-                energy_kwh = elapsed_seconds * 0.015
-                
-                # Tariff: Rs. 15 per kWh + flat Rs. 10 base service fee
-                energy_cost = energy_kwh * 15.0
-                service_fee = 10.0
-                tax_percentage = 18.0
-                tax_amount = (energy_cost + service_fee) * (tax_percentage / 100.0)
-                total_cost = energy_cost + service_fee + tax_amount
-                
                 prepaid_limit = float(sim_data.get("prepaid_amount") or 200.0)
-                if total_cost >= prepaid_limit:
-                    total_cost = prepaid_limit
-                    energy_kwh = max(0.0, (prepaid_limit / 1.18 - 10.0) / 15.0)
-                    energy_cost = energy_kwh * 15.0
-                    tax_amount = prepaid_limit - energy_cost - service_fee
                 
-                billing = {
-                    "energy_kwh": round(energy_kwh, 2),
-                    "energy_usage_fee": round(energy_cost, 2),
-                    "service_fee": service_fee,
-                    "tax_percentage": tax_percentage,
-                    "tax_amount": round(tax_amount, 2),
-                    "total_amount": round(total_cost, 2)
-                }
+                # Use generate_live_telemetry to get simulated live metrics
+                telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit)
                 
                 return {
                     "active": True,
                     "transaction_id": "sim_tx_" + str(int(dt_start.timestamp())),
                     "user_mobile": sim_data.get("customer_mobile"),
                     "user_name": "Guest User",
-                    "energy_kwh": round(energy_kwh, 2),
-                    "cost_rs": round(total_cost, 2),
+                    "energy_kwh": telemetry["energy_kwh"],
+                    "cost_rs": telemetry["cost_rs"],
                     "elapsed_seconds": elapsed_seconds,
                     "start_time": start_time_raw,
-                    "billing": billing,
+                    "billing": telemetry["billing"],
                     "charger_name": "test device",
                     "location_name": "OCPI Test Location - PROD",
                     "vehicle_model": "Tata Nexon EV",
-                    "stop_reason": "Charging"
+                    "stop_reason": "Charging",
+                    "power_kw": telemetry["power_kw"],
+                    "voltage_v": telemetry["voltage_v"],
+                    "current_a": telemetry["current_a"]
                 }
         except Exception as sim_err:
             print(f"[status-simulation] Error reading simulation session: {sim_err}")
@@ -708,15 +743,49 @@ def get_charging_status(charger_id: str):
                 from RemoteStop import get_available_connectors
                 connectors, _ = get_available_connectors(charger_id)
                 if connectors and any(c.get("status") in ["Charging", "Preparing"] for c in connectors):
+                    elapsed_seconds = 0
+                    prepaid_limit = 200.0
+                    start_time_raw = None
+                    customer_mobile = "9999999999"
+                    
+                    pay_path = os.path.join(BASE_DIR, "data", "active_payments.json")
+                    if os.path.exists(pay_path):
+                        try:
+                            with open(pay_path, "r", encoding="utf-8") as f:
+                                pay_data = json.load(f)
+                            target_key = str(charger_id).strip()
+                            if target_key in pay_data:
+                                sess = pay_data[target_key]
+                                prepaid_limit = float(sess.get("prepaid_amount") or 200.0)
+                                start_time_raw = sess.get("timestamp")
+                                customer_mobile = sess.get("customer_mobile", "9999999999")
+                                if start_time_raw:
+                                    try:
+                                        dt_start = datetime.fromisoformat(start_time_raw.replace("Z", "+00:00"))
+                                        elapsed_seconds = int((datetime.now(timezone.utc) - dt_start).total_seconds())
+                                    except Exception:
+                                        pass
+                        except Exception as pay_err:
+                            print(f"[status-fallback-payment] Error reading active payments: {pay_err}")
+                            
+                    telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit)
                     return {
                         "active": True,
                         "transaction_id": "awaiting_sync",
-                        "user_mobile": "",
+                        "user_mobile": customer_mobile,
                         "user_name": "Awaiting Sync",
-                        "energy_kwh": 0.0,
-                        "cost_rs": 0.0,
-                        "elapsed_seconds": 0,
-                        "start_time": None
+                        "energy_kwh": telemetry["energy_kwh"],
+                        "cost_rs": telemetry["cost_rs"],
+                        "elapsed_seconds": elapsed_seconds,
+                        "start_time": start_time_raw,
+                        "billing": telemetry["billing"],
+                        "charger_name": charger_id,
+                        "location_name": "OCPI Test Location - PROD",
+                        "vehicle_model": "--",
+                        "stop_reason": "Charging",
+                        "power_kw": telemetry["power_kw"],
+                        "voltage_v": telemetry["voltage_v"],
+                        "current_a": telemetry["current_a"]
                     }
             except Exception as conn_err:
                 print(f"[status-fallback] Error checking connectors: {conn_err}")
@@ -751,8 +820,6 @@ def get_charging_status(charger_id: str):
         except Exception as conn_err:
             print(f"[status] Error checking connectors during active transaction: {conn_err}")
 
-
-            
         # Clean and return running metrics
         start_time_raw = active_tx.get("startAt")
         elapsed_seconds = 0
@@ -764,22 +831,55 @@ def get_charging_status(charger_id: str):
             except Exception:
                 pass
                 
+        # Look up prepaid limit from active_payments.json to feed telemetry generator
+        prepaid_limit = 200.0
+        pay_path = os.path.join(BASE_DIR, "data", "active_payments.json")
+        if os.path.exists(pay_path):
+            try:
+                with open(pay_path, "r", encoding="utf-8") as f:
+                    pay_data = json.load(f)
+                target_key = str(charger_id).strip()
+                if target_key in pay_data:
+                    prepaid_limit = float(pay_data[target_key].get("prepaid_amount") or 200.0)
+            except Exception:
+                pass
+                
+        telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit)
+        
         billing = calculate_detailed_billing(active_tx)
+        
+        # Merge scraped energy/cost with dead-reckon telemetry (pick the maximum to be safe against delays)
+        scraped_energy = billing.get("energy_kwh") or 0.0
+        scraped_cost = billing.get("total_amount") or 0.0
+        
+        final_energy = max(scraped_energy, telemetry["energy_kwh"])
+        final_cost = max(scraped_cost, telemetry["cost_rs"])
+        
+        # Update billing fields with our final capped/merged values
+        merged_billing = {
+            **telemetry["billing"],
+            "energy_kwh": round(final_energy, 2),
+            "total_amount": round(final_cost, 2),
+            "energy_usage_fee": round(max(billing.get("energy_usage_fee") or 0.0, telemetry["billing"].get("energy_usage_fee") or 0.0), 2)
+        }
             
         return {
             "active": True,
             "transaction_id": active_tx.get("transactionId") or active_tx.get("_id"),
             "user_mobile": active_tx.get("userMobile"),
             "user_name": active_tx.get("userName"),
-            "energy_kwh": billing["energy_kwh"],
-            "cost_rs": billing["total_amount"],
+            "energy_kwh": round(final_energy, 2),
+            "cost_rs": round(final_cost, 2),
             "elapsed_seconds": elapsed_seconds,
             "start_time": start_time_raw,
-            "billing": billing,
+            "billing": merged_billing,
             "charger_name": active_tx.get("chargerName") or (active_tx.get("chargerDetails", {}).get("name") if active_tx.get("chargerDetails") else charger_id),
             "location_name": active_tx.get("locationName") or "OCPI Test Location - PROD",
             "vehicle_model": active_tx.get("vehicleModel", "--"),
-            "stop_reason": active_tx.get("stopReason", "Stopped Remotely")
+            "stop_reason": active_tx.get("stopReason", "Stopped Remotely"),
+            "power_kw": telemetry["power_kw"],
+            "voltage_v": telemetry["voltage_v"],
+            "current_a": telemetry["current_a"]
         }
         
     except Exception as e:
