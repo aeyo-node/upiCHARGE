@@ -51,6 +51,132 @@ def get_available_connectors(identity):
         })
     return connectors, None
 
+def get_charger_max_power(charger_id: str) -> float:
+    try:
+        from chargepoints import fetch_chargepoint_details
+        details = fetch_chargepoint_details(charger_id)
+        if details:
+            for evse in details.get("evses", []):
+                max_pwr = evse.get("maxOutputPower")
+                if max_pwr:
+                    return float(max_pwr)
+    except Exception:
+        pass
+    # Fallbacks
+    if "CMOD0135" in str(charger_id):
+        return 60.0
+    if "5001" in str(charger_id):
+        return 3.3
+    if str(charger_id).strip() == "185599798823820":
+        return 30.0
+    return 7.4
+
+def is_charger_dc(charger_id: str) -> bool:
+    try:
+        from chargepoints import fetch_chargepoint_details
+        details = fetch_chargepoint_details(charger_id)
+        if details:
+            for evse in details.get("evses", []):
+                cons = evse.get("connectors", {})
+                if isinstance(cons, list) and len(cons) > 0:
+                    cons = cons[0]
+                elif not isinstance(cons, dict):
+                    cons = {}
+                
+                con_type = str(cons.get("name", "Unknown")).upper()
+                power_type = str(cons.get("powerType", "Unknown")).upper()
+                max_power = float(evse.get("maxOutputPower") or 0.0)
+                
+                if "DC" in power_type or "DC" in con_type or "CCS" in con_type or "CHA" in con_type or max_power > 22.0:
+                    return True
+    except Exception:
+        pass
+    max_power = get_charger_max_power(charger_id)
+    return max_power > 22.0
+
+def get_solar_seconds(start_time: datetime, end_time: datetime) -> float:
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
+    if end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=timezone.utc)
+        
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    start_ist = start_time.astimezone(ist_tz)
+    end_ist = end_time.astimezone(ist_tz)
+    
+    total_seconds = (end_ist - start_ist).total_seconds()
+    if total_seconds <= 0:
+        return 0.0
+        
+    solar_seconds = 0.0
+    curr_date = start_ist.date()
+    while curr_date <= end_ist.date():
+        solar_start = datetime(curr_date.year, curr_date.month, curr_date.day, 9, 0, 0, tzinfo=ist_tz)
+        solar_end = datetime(curr_date.year, curr_date.month, curr_date.day, 16, 0, 0, tzinfo=ist_tz)
+        
+        overlap_start = max(start_ist, solar_start)
+        overlap_end = min(end_ist, solar_end)
+        
+        if overlap_start < overlap_end:
+            solar_seconds += (overlap_end - overlap_start).total_seconds()
+            
+        curr_date += timedelta(days=1)
+        
+    return solar_seconds
+
+def calculate_custom_tariff(charger_id: str, start_time: datetime, end_time: datetime, total_energy_kwh: float) -> dict:
+    is_dc = is_charger_dc(charger_id)
+    
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
+    if end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=timezone.utc)
+        
+    start_ist = start_time.astimezone(ist_tz)
+    end_ist = end_time.astimezone(ist_tz)
+    
+    total_seconds = (end_ist - start_ist).total_seconds()
+    if total_seconds <= 0:
+        total_seconds = 1.0
+        
+    solar_seconds = get_solar_seconds(start_time, end_time)
+    solar_seconds = min(total_seconds, max(0.0, solar_seconds))
+    nonsolar_seconds = total_seconds - solar_seconds
+    
+    solar_fraction = solar_seconds / total_seconds
+    nonsolar_fraction = nonsolar_seconds / total_seconds
+    
+    if is_dc:
+        solar_service_rate = 11.0
+        solar_energy_rate = 5.0
+        nonsolar_service_rate = 13.0
+        nonsolar_energy_rate = 9.30
+    else:
+        solar_service_rate = 3.0
+        solar_energy_rate = 5.0
+        nonsolar_service_rate = 4.0
+        nonsolar_energy_rate = 9.30
+        
+    solar_energy = total_energy_kwh * solar_fraction
+    nonsolar_energy = total_energy_kwh * nonsolar_fraction
+    
+    service_fee_excl = round((solar_service_rate * solar_energy) + (nonsolar_service_rate * nonsolar_energy), 2)
+    energy_usage_fee = round((solar_energy_rate * solar_energy) + (nonsolar_energy_rate * nonsolar_energy), 2)
+    
+    tax_percentage = 18.0
+    tax_amount = round(service_fee_excl * (tax_percentage / 100.0), 2)
+    total_amount = round(service_fee_excl + energy_usage_fee + tax_amount, 2)
+    
+    return {
+        "energy_kwh": round(total_energy_kwh, 2),
+        "energy_usage_fee": energy_usage_fee,
+        "service_fee": service_fee_excl,
+        "tax_percentage": tax_percentage,
+        "tax_amount": tax_amount,
+        "total_amount": total_amount
+    }
+
 def calculate_detailed_billing(active_tx: dict) -> dict:
     """
     Calculates detailed tax-exclusive and tax-inclusive billing breakdown
@@ -67,7 +193,6 @@ def calculate_detailed_billing(active_tx: dict) -> dict:
         }
         
     is_time_based = active_tx.get("isTimeBasedTariff", False)
-    vat = float(active_tx.get("vat") or 18.0)
     
     # Extract raw energy in Wh
     raw_energy_wh = 0.0
@@ -105,57 +230,31 @@ def calculate_detailed_billing(active_tx: dict) -> dict:
                 
     energy_kwh = round(raw_energy_wh / 1000.0, 2)
     
-    # Calculate Service Fee (baseDeductiveAmount)
-    service_fee = float(active_tx.get("baseDeductiveAmount") or 0.0)
-    # Check if we are time-based, sometimes the base fee is nested in hourly breakdown
-    if is_time_based and service_fee == 0.0:
-        breakdown = active_tx.get("hourlyTariffBreakdown") or {}
-        def extract_breakdown_base_recursive(d):
-            base_val = 0.0
-            if not isinstance(d, dict):
-                return base_val
-            if "base" in d:
-                return float(d.get("base") or 0)
-            for val in d.values():
-                if isinstance(val, dict):
-                    base_val = max(base_val, extract_breakdown_base_recursive(val))
-            return base_val
-        service_fee = extract_breakdown_base_recursive(breakdown)
+    # Retrieve charger ID and timestamps for custom split tariff calculation
+    charger_id = str(active_tx.get("chargerId") or active_tx.get("identity") or active_tx.get("stationId") or "").strip()
+    if not charger_id and "chargerDetails" in active_tx:
+        charger_id = str(active_tx.get("chargerDetails", {}).get("identity", "")).strip()
         
-    # Calculate Energy Usage Fee (tax-exclusive)
-    energy_usage_fee = 0.0
-    if is_time_based:
-        breakdown = active_tx.get("hourlyTariffBreakdown") or {}
-        def extract_breakdown_amt_recursive(d):
-            amt = 0.0
-            if not isinstance(d, dict):
-                return amt
-            if "amount" in d:
-                return float(d.get("amount") or 0)
-            for val in d.values():
-                if isinstance(val, dict):
-                    amt += extract_breakdown_amt_recursive(val)
-            return amt
-        # breakdown amount is in millirupees, convert to Rupees
-        energy_usage_fee = round(extract_breakdown_amt_recursive(breakdown) / 1000.0, 2)
-    else:
-        tariff_amt = float(active_tx.get("tariffAmount") or 0.0)
-        energy_usage_fee = round(energy_kwh * tariff_amt, 2)
-        
-    # Now, calculate subtotal and tax
-    # The official app treats BOTH service fee and energy usage fee as tax-exclusive!
-    subtotal = service_fee + energy_usage_fee
-    tax_amount = round(subtotal * (vat / 100.0), 2)
-    total_amount = round(subtotal + tax_amount, 2)
+    start_time_raw = active_tx.get("startAt") or active_tx.get("startTime") or active_tx.get("created_at")
+    stop_time_raw = active_tx.get("stopAt") or active_tx.get("stopTime")
     
-    return {
-        "energy_kwh": energy_kwh,
-        "energy_usage_fee": energy_usage_fee,
-        "service_fee": service_fee,
-        "tax_percentage": vat,
-        "tax_amount": tax_amount,
-        "total_amount": total_amount
-    }
+    if start_time_raw:
+        try:
+            start_time = datetime.fromisoformat(start_time_raw.replace("Z", "+00:00"))
+        except Exception:
+            start_time = datetime.now(timezone.utc)
+    else:
+        start_time = datetime.now(timezone.utc)
+        
+    if stop_time_raw:
+        try:
+            end_time = datetime.fromisoformat(stop_time_raw.replace("Z", "+00:00"))
+        except Exception:
+            end_time = datetime.now(timezone.utc)
+    else:
+        end_time = datetime.now(timezone.utc)
+        
+    return calculate_custom_tariff(charger_id, start_time, end_time, energy_kwh)
 
 def extract_active_tx_metrics(active_tx: dict) -> tuple:
     """

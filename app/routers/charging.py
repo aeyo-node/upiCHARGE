@@ -128,47 +128,49 @@ def get_charger_max_power(charger_id: str) -> float:
         return 3.3
     return 7.4
 
-def get_charger_tariff(charger_id: str) -> dict:
+def get_charger_tariff(charger_id: str, start_time: datetime = None) -> dict:
     """
-    Attempts to read tariff details from cached charger file.
+    Attempts to read tariff details from cached charger file or falls back to custom solar/non-solar rates.
     Returns: { "base": float, "unit_rate": float, "vat": float, "is_time_based": bool }
     """
-    res = {
-        "base": 0.0,
-        "unit_rate": 15.0,
-        "vat": 18.0,
-        "is_time_based": False
-    }
+    if start_time is None:
+        start_time = datetime.now(timezone.utc)
+        
     try:
-        import os
-        import json
-        filepath = os.path.join(BASE_DIR, "data", "chargers", f"charger_{charger_id}.json")
-        if os.path.exists(filepath):
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            # Try to get tariff from the first connector's newTariff
-            evses = data.get("evses", [])
-            if evses:
-                evse = evses[0]
-                new_tariff = evse.get("newTariff", {}).get("tariff") or {}
-                if new_tariff:
-                    res["base"] = float(new_tariff.get("baseDeductiveAmount") or 0.0)
-                    res["unit_rate"] = float(new_tariff.get("extraDeductiveAmount") or 15.0)
-                    res["vat"] = float(new_tariff.get("vat") or 18.0)
-                    res["is_time_based"] = bool(new_tariff.get("isTimeBasedTariff", False))
-                    return res
-            # Fallback to general tariff list
-            tariff_list = data.get("tariff", [])
-            if tariff_list:
-                t = tariff_list[0]
-                res["base"] = float(t.get("baseDeductiveAmount") or 0.0)
-                res["unit_rate"] = float(t.get("extraDeductiveAmount") or 15.0)
-                res["vat"] = float(t.get("vat") or 18.0)
+        from RemoteStop import is_charger_dc
+        is_dc = is_charger_dc(charger_id)
+        
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        start_ist = start_time.astimezone(ist_tz)
+        
+        # Check if the start hour is in the solar window (9 AM to 4 PM IST)
+        is_solar = 9 <= start_ist.hour < 16
+        
+        if is_dc:
+            base = 11.0 if is_solar else 13.0
+            unit_rate = 5.0 if is_solar else 9.30
+        else:
+            base = 3.0 if is_solar else 4.0
+            unit_rate = 5.0 if is_solar else 9.30
+            
+        return {
+            "base": base,
+            "unit_rate": unit_rate,
+            "vat": 18.0,
+            "is_time_based": False
+        }
     except Exception as e:
-        print(f"[get_charger_tariff] Error reading tariff for charger {charger_id}: {e}")
-    return res
+        print(f"[get_charger_tariff] Error reading dynamic tariff: {e}")
+        return {
+            "base": 4.0,
+            "unit_rate": 9.30,
+            "vat": 18.0,
+            "is_time_based": False
+        }
 
-def generate_live_telemetry(charger_id: str, elapsed_seconds: int, prepaid_limit: float) -> dict:
+def generate_live_telemetry(charger_id: str, elapsed_seconds: int, prepaid_limit: float, start_time: datetime = None) -> dict:
     import math
     import random
     max_power = get_charger_max_power(charger_id)
@@ -199,39 +201,33 @@ def generate_live_telemetry(charger_id: str, elapsed_seconds: int, prepaid_limit
     avg_power = max_power * 0.95 if max_power > 22.0 else max_power * 0.98
     energy_kwh = (avg_power * elapsed_seconds) / 3600.0
     
-    # 3. Running cost calculation matching our tariff structure:
-    tariff = get_charger_tariff(charger_id)
-    service_fee = tariff["base"]
-    unit_rate = tariff["unit_rate"]
-    tax_percentage = tariff["vat"]
+    # 3. Running cost calculation using the dynamic time-split tariff structure
+    if start_time is None:
+        start_time = datetime.now(timezone.utc) - timedelta(seconds=elapsed_seconds)
+    end_time = start_time + timedelta(seconds=elapsed_seconds)
     
-    energy_cost = energy_kwh * unit_rate
-    tax_amount = (energy_cost + service_fee) * (tax_percentage / 100.0)
-    total_cost = energy_cost + service_fee + tax_amount
+    from RemoteStop import calculate_custom_tariff
+    billing = calculate_custom_tariff(charger_id, start_time, end_time, energy_kwh)
+    total_cost = billing["total_amount"]
     
     # Ensure we never exceed the prepaid limit!
     if total_cost >= prepaid_limit:
         total_cost = prepaid_limit
-        if unit_rate > 0.0:
-            energy_kwh = max(0.0, (prepaid_limit / (1.0 + tax_percentage / 100.0) - service_fee) / unit_rate)
+        if energy_kwh > 0.0 and total_cost > 0.0:
+            effective_rate = billing["total_amount"] / energy_kwh
+            energy_kwh = prepaid_limit / effective_rate
         else:
             energy_kwh = 0.0
-        energy_cost = energy_kwh * unit_rate
-        tax_amount = prepaid_limit - energy_cost - service_fee
+            
+        # Re-calculate split billing at capped energy
+        billing = calculate_custom_tariff(charger_id, start_time, end_time, energy_kwh)
+        billing["total_amount"] = prepaid_limit
+        
         # Shut down physical power representation
         power_kw = 0.0
         current_a = 0.0
         voltage_v = 230.0 if max_power <= 22.0 else 0.0
         
-    billing = {
-        "energy_kwh": round(energy_kwh, 2),
-        "energy_usage_fee": round(energy_cost, 2),
-        "service_fee": service_fee,
-        "tax_percentage": tax_percentage,
-        "tax_amount": round(tax_amount, 2),
-        "total_amount": round(total_cost, 2)
-    }
-    
     return {
         "power_kw": round(power_kw, 2),
         "voltage_v": round(voltage_v, 1),
@@ -710,7 +706,7 @@ def get_charging_status(charger_id: str):
                 prepaid_limit = float(sim_data.get("prepaid_amount") or 200.0)
                 
                 # Use generate_live_telemetry to get simulated live metrics
-                telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit)
+                telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit, start_time=dt_start)
                 
                 return {
                     "active": True,
@@ -802,6 +798,7 @@ def get_charging_status(charger_id: str):
                     prepaid_limit = 200.0
                     start_time_raw = None
                     customer_mobile = "9999999999"
+                    dt_start = None
                     
                     pay_path = os.path.join(BASE_DIR, "data", "active_payments.json")
                     if os.path.exists(pay_path):
@@ -823,7 +820,7 @@ def get_charging_status(charger_id: str):
                         except Exception as pay_err:
                             print(f"[status-fallback-payment] Error reading active payments: {pay_err}")
                             
-                    telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit)
+                    telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit, start_time=dt_start)
                     return {
                         "active": True,
                         "transaction_id": "awaiting_sync",
@@ -880,6 +877,7 @@ def get_charging_status(charger_id: str):
         # Clean and return running metrics
         start_time_raw = active_tx.get("startAt")
         elapsed_seconds = 0
+        dt_start = None
         if start_time_raw:
             try:
                 # e.g., '2026-06-03T12:00:00.000Z'
@@ -901,7 +899,7 @@ def get_charging_status(charger_id: str):
             except Exception:
                 pass
                 
-        telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit)
+        telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit, start_time=dt_start)
         
         billing = calculate_detailed_billing(active_tx)
         
@@ -965,34 +963,23 @@ def stop_charging(req: StopChargingRequest):
             elapsed_seconds = int((datetime.now(timezone.utc) - dt_start).total_seconds())
             
             charger_id = sim_data.get("charger_id", req.charger_id)
-            tariff = get_charger_tariff(charger_id)
-            service_fee = tariff["base"]
-            unit_rate = tariff["unit_rate"]
-            tax_percentage = tariff["vat"]
-
             energy_kwh = elapsed_seconds * 0.015
-            energy_cost = energy_kwh * unit_rate
-            tax_amount = (energy_cost + service_fee) * (tax_percentage / 100.0)
-            total_cost = energy_cost + service_fee + tax_amount
+            
+            from RemoteStop import calculate_custom_tariff
+            end_time = datetime.now(timezone.utc)
+            billing = calculate_custom_tariff(charger_id, dt_start, end_time, energy_kwh)
+            total_cost = billing["total_amount"]
             
             prepaid_limit = float(sim_data.get("prepaid_amount") or req.prepaid_amount)
             if total_cost >= prepaid_limit:
                 total_cost = prepaid_limit
-                if unit_rate > 0.0:
-                    energy_kwh = max(0.0, (prepaid_limit / (1.0 + tax_percentage / 100.0) - service_fee) / unit_rate)
+                if energy_kwh > 0.0 and total_cost > 0.0:
+                    effective_rate = total_cost / energy_kwh
+                    energy_kwh = prepaid_limit / effective_rate
                 else:
                     energy_kwh = 0.0
-                energy_cost = energy_kwh * unit_rate
-                tax_amount = prepaid_limit - energy_cost - service_fee
-                
-            billing = {
-                "energy_kwh": round(energy_kwh, 2),
-                "energy_usage_fee": round(energy_cost, 2),
-                "service_fee": service_fee,
-                "tax_percentage": tax_percentage,
-                "tax_amount": round(tax_amount, 2),
-                "total_amount": round(total_cost, 2)
-            }
+                billing = calculate_custom_tariff(charger_id, dt_start, end_time, energy_kwh)
+                billing["total_amount"] = prepaid_limit
             
             tx_details = {
                 "amount": round(total_cost, 2),
