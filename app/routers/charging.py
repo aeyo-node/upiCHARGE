@@ -568,7 +568,7 @@ def start_charging(req: StartChargingRequest):
     """
     cleaned_mobile = clean_mobile(req.customer_mobile)
     if not cleaned_mobile:
-        cleaned_mobile = "8086477654"
+        cleaned_mobile = "8065481497"
 
     print(f"\n[DEBUG /start] Received start charging request:")
     print(f"  - charger_id: {req.charger_id}")

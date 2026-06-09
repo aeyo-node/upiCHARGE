@@ -46,7 +46,7 @@ export default function Home() {
   const [selectedConnector, setSelectedConnector] = useState(null);
   const [prepaidAmount, setPrepaidAmount] = useState(200);
   const [customAmount, setCustomAmount] = useState("");
-  const [customerMobile, setCustomerMobile] = useState("+918086477654");
+  const [customerMobile, setCustomerMobile] = useState("+918065481497");
   const [isDummyMode, setIsDummyMode] = useState(true);
   
   // Charging state feedback
@@ -1031,7 +1031,7 @@ export default function Home() {
   // Restore charging state on load (Session Persistence!)
   useEffect(() => {
     if (typeof window !== "undefined") {
-      setCustomerMobile("+918086477654");
+      setCustomerMobile("+918065481497");
     }
     const savedSession = localStorage.getItem("active_charge_session");
     if (savedSession) {
@@ -1039,7 +1039,7 @@ export default function Home() {
         const parsed = JSON.parse(savedSession);
         setActiveSession(parsed);
         setChargerId(parsed.charger_id);
-        setCustomerMobile(parsed.customer_mobile || "+918086477654");
+        setCustomerMobile(parsed.customer_mobile || "+918065481497");
         setPrepaidAmount(parsed.prepaid_amount);
         setScreen("charging");
       } catch (e) {
@@ -1794,7 +1794,7 @@ export default function Home() {
             <h3 className="text-xs font-bold uppercase tracking-wider text-[#86868b]">Direct Live Helplines</h3>
             <div className="space-y-2 text-sm">
               <a 
-                href="https://wa.me/918086477654" 
+                href="https://wa.me/918065481497" 
                 target="_blank" 
                 rel="noreferrer"
                 className="w-full p-4 rounded-2xl border border-black/5 glass hover:bg-black/5 flex items-center justify-between transition"
@@ -1809,12 +1809,12 @@ export default function Home() {
               </a>
 
               <a 
-                href="tel:+918086477654"
+                href="tel:+918065481497"
                 className="w-full p-4 rounded-2xl border border-black/5 glass hover:bg-black/5 flex items-center justify-between transition text-left"
               >
                 <div className="flex flex-col justify-start">
                   <span className="text-[10px] text-[#86868b] uppercase tracking-wider font-bold">Helpline Desk</span>
-                  <span className="text-[#1d1d1f] font-bold text-lg mt-1">+91 80864 77654</span>
+                  <span className="text-[#1d1d1f] font-bold text-lg mt-1">+91 80654 81497</span>
                   <p className="text-xs text-[#86868b] mt-1 font-light">Available 24x7 for physical charging site assistance.</p>
                 </div>
                 <ArrowRight className="h-4 w-4 text-[#86868b]" />
