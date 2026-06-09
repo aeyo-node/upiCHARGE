@@ -672,23 +672,51 @@ export default function Home() {
           name: orderData.name,
           description: orderData.description,
           order_id: orderData.order_id,
-          handler: function (response) {
-            const initialSession = {
-              charger_id: chargerId,
-              connector_id: selectedConnector.connector_id,
-              customer_mobile: finalMobile,
-              prepaid_amount: finalPrepaid,
-              energy_kwh: 0,
-              cost_rs: 0,
-              elapsed_seconds: 0,
-              power_kw: 0,
-              voltage_v: 0,
-              current_a: 0
-            };
-            localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
-            setActiveSession(initialSession);
-            setScreen("charging");
-            triggerBrowserNotification("⚡ Charging Started!", `Prepaid Limit: ₹${finalPrepaid}`);
+          handler: async function (response) {
+            setLoading(true);
+            setErrorErrorMsg("");
+            try {
+              const verifyRes = await fetch(`${apiBase}/api/payments/verify-payment`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_signature: response.razorpay_signature,
+                  charger_id: chargerId,
+                  connector_id: selectedConnector.connector_id,
+                  customer_mobile: finalMobile,
+                  amount: finalPrepaid
+                })
+              });
+
+              if (!verifyRes.ok) {
+                const errData = await verifyRes.json();
+                throw new Error(errData.detail || "Payment verification failed.");
+              }
+
+              const initialSession = {
+                charger_id: chargerId,
+                connector_id: selectedConnector.connector_id,
+                customer_mobile: finalMobile,
+                prepaid_amount: finalPrepaid,
+                energy_kwh: 0,
+                cost_rs: 0,
+                elapsed_seconds: 0,
+                power_kw: 0,
+                voltage_v: 0,
+                current_a: 0
+              };
+              localStorage.setItem("active_charge_session", JSON.stringify(initialSession));
+              setActiveSession(initialSession);
+              setScreen("charging");
+              triggerBrowserNotification("⚡ Charging Started!", `Prepaid Limit: ₹${finalPrepaid}`);
+            } catch (err) {
+              setErrorErrorMsg(err.message || "Payment verification and start failed.");
+              setScreen("connector");
+            } finally {
+              setLoading(false);
+            }
           },
           prefill: {
             contact: finalMobile,

@@ -24,6 +24,15 @@ class CreateOrderRequest(BaseModel):
     customer_mobile: str = "9999999999"
     amount: float
 
+class VerifyPaymentRequest(BaseModel):
+    razorpay_payment_id: str
+    razorpay_order_id: str
+    razorpay_signature: str
+    charger_id: str
+    connector_id: int
+    customer_mobile: str
+    amount: float
+
 def clean_mobile(phone: str) -> str:
     """
     Cleans and standardizes the customer mobile number to a 10-digit string.
@@ -245,6 +254,193 @@ async def create_order(req: CreateOrderRequest):
     except Exception as e:
         print(f"[Create Order Live Error] Razorpay order creation failed: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to create live Razorpay order: {str(e)}")
+
+@router.post("/verify-payment")
+async def verify_payment(req: VerifyPaymentRequest):
+    """
+    Verifies a Razorpay payment signature client-side and triggers immediate remote start of the charger.
+    This acts as a fast-path/backup for the webhook.
+    """
+    # 1. Verify payment signature in live mode
+    if get_payment_mode() == "live":
+        if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
+            print("[Payment Verification Error] Razorpay credentials missing in live mode.")
+            raise HTTPException(status_code=500, detail="Razorpay credentials not configured on server")
+        try:
+            client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+            params_dict = {
+                'razorpay_order_id': req.razorpay_order_id,
+                'razorpay_payment_id': req.razorpay_payment_id,
+                'razorpay_signature': req.razorpay_signature
+            }
+            client.utility.verify_payment_signature(params_dict)
+            print("[Payment Verification] Signature verified successfully.")
+        except Exception as sig_err:
+            print(f"[Payment Verification Failure] Invalid signature: {sig_err}")
+            raise HTTPException(status_code=400, detail="Invalid payment signature")
+    else:
+        print("[Payment Verification Dummy] Skipping signature verification in dummy mode.")
+
+    # 2. Check if charger is already charging to avoid duplicate starts
+    filepath = os.path.join(BASE_DIR, "data", "transactions_db.json")
+    already_started = False
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                db = json.load(f)
+            for r in db:
+                if r.get("order_id") == req.razorpay_order_id and r.get("charging_status") == "charging":
+                    already_started = True
+                    tx_id = r.get("charge_mod_tx_id")
+                    print(f"[Payment Verification] Charger already started for order {req.razorpay_order_id} (tx: {tx_id})")
+                    break
+        except Exception as e:
+            print(f"[Payment Verification] Error checking transaction db: {e}")
+
+    if already_started:
+        return {"status": "success", "message": "Charger already started"}
+
+    customer_phone = clean_mobile(req.customer_mobile)
+    if not customer_phone:
+        customer_phone = "9999999999"
+
+    # 3. Get connection protocol
+    connection_type = "GRIDSCAPE"
+    try:
+        from chargepoints import fetch_chargepoint_details
+        details = fetch_chargepoint_details(req.charger_id)
+        if details:
+            connection_type = details.get("chargePointConnectionProtocol", "GRIDSCAPE")
+    except Exception as e:
+        print(f"[Payment Verification] Error fetching charger connection protocol: {e}")
+
+    # 4. Try starting charger using custom QR Remote Start Transaction API
+    qr_start_url = f"https://tts.console.chargemod.com/{req.charger_id}/Socket-RemoteStartTransaction"
+    qr_start_payload = {
+        "connectorId": req.connector_id,
+        "connectionType": connection_type,
+        "idTag": "CHARGEMODTAG",
+        "userId": req.razorpay_payment_id,
+        "organizationId": "64b793030dd6bb39c1c3e270",
+        "projectId": "6494141957d29409895704d2",
+        "usageType": "WALLET",
+        "protocol": "QR"
+    }
+
+    print(f"[Payment Verification] Calling QR RemoteStart API: {qr_start_url}")
+    print(f"[Payment Verification] Payload: {json.dumps(qr_start_payload)}")
+
+    qr_start_success = False
+    qr_response_data = {}
+    tx_id = None
+
+    if get_payment_mode() == "dummy":
+        print("[Payment Verification Dummy] Simulating successful QR start in dummy mode.")
+        qr_start_success = True
+        tx_id = f"sim_tx_{int(datetime.now(timezone.utc).timestamp())}"
+        qr_response_data = {"status": "success", "transactionId": tx_id}
+    else:
+        try:
+            from auth_key import get_auth_token
+            token = get_auth_token()
+            headers = {
+                "Content-Type": "application/json"
+            }
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            
+            response = requests.post(qr_start_url, json=qr_start_payload, headers=headers)
+            print(f"[Payment Verification] QR start response code: {response.status_code}")
+            print(f"[Payment Verification] QR start response body: {response.text}")
+            
+            if response.status_code == 200:
+                qr_response_data = response.json()
+                if qr_response_data.get("status") == "Rejected":
+                    print(f"[Payment Verification] QR start Rejected: {qr_response_data}")
+                else:
+                    qr_start_success = True
+                    tx_id = qr_response_data.get("transactionId") or qr_response_data.get("result", {}).get("transactionId")
+            else:
+                print(f"[Payment Verification] QR start API failed: {response.status_code}")
+        except Exception as qr_err:
+            print(f"[Payment Verification] Exception on QR start API: {qr_err}")
+
+    if qr_start_success:
+        print(f"[Payment Verification] QR Start API successful. Captured Transaction ID: {tx_id}")
+        save_active_payment(req.charger_id, req.razorpay_payment_id, req.amount, customer_phone, req.connector_id, tx_id)
+        upsert_transaction(
+            order_id=req.razorpay_order_id,
+            payment_id=req.razorpay_payment_id,
+            charger_id=req.charger_id,
+            connector_id=req.connector_id,
+            amount=req.amount,
+            customer_mobile=customer_phone,
+            status="captured",
+            captured_at=datetime.now(timezone.utc).isoformat(),
+            charging_status="charging",
+            charging_start_time=datetime.now(timezone.utc).isoformat(),
+            charge_mod_tx_id=tx_id
+        )
+        return {
+            "status": "success",
+            "message": "Payment verified and charger successfully started via QR API",
+            "payment_id": req.razorpay_payment_id,
+            "charger_id": req.charger_id,
+            "transaction_id": tx_id
+        }
+    else:
+        # 5. Fallback to V1 Start (OCPP trigger under master customer account)
+        print(f"[Payment Verification] Falling back to V1 charger_action...")
+        res = charger_action(
+            action="start",
+            charger_identity=req.charger_id,
+            customer_mobile=customer_phone,
+            connector_id=req.connector_id,
+            otp_method="skip"
+        )
+        print(f"[Payment Verification] Fallback chargeMOD start response: {json.dumps(res)}")
+        
+        save_active_payment(req.charger_id, req.razorpay_payment_id, req.amount, customer_phone, req.connector_id)
+        
+        if "error" in res or res.get("status") != "success":
+            upsert_transaction(
+                order_id=req.razorpay_order_id,
+                payment_id=req.razorpay_payment_id,
+                charger_id=req.charger_id,
+                connector_id=req.connector_id,
+                amount=req.amount,
+                customer_mobile=customer_phone,
+                status="captured",
+                captured_at=datetime.now(timezone.utc).isoformat(),
+                charging_status="failed",
+                cost_rs=0.0
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Payment verified, but failed to start charger: {res.get('error') or res.get('message')}"
+            )
+        
+        v1_tx_id = res.get("transactionId") or "v1_fallback_tx"
+        upsert_transaction(
+            order_id=req.razorpay_order_id,
+            payment_id=req.razorpay_payment_id,
+            charger_id=req.charger_id,
+            connector_id=req.connector_id,
+            amount=req.amount,
+            customer_mobile=customer_phone,
+            status="captured",
+            captured_at=datetime.now(timezone.utc).isoformat(),
+            charging_status="charging",
+            charging_start_time=datetime.now(timezone.utc).isoformat(),
+            charge_mod_tx_id=v1_tx_id
+        )
+        return {
+            "status": "success",
+            "message": "Payment verified and charger successfully started via V1 fallback",
+            "payment_id": req.razorpay_payment_id,
+            "charger_id": req.charger_id,
+            "transaction_id": v1_tx_id
+        }
 
 @router.post("/webhook")
 async def razorpay_webhook(
