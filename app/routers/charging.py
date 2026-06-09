@@ -117,14 +117,32 @@ def get_charger_max_power(charger_id: str) -> float:
         if details:
             for evse in details.get("evses", []):
                 max_pwr = evse.get("maxOutputPower")
+                cons = evse.get("connectors", {})
+                if isinstance(cons, list) and len(cons) > 0:
+                    cons = cons[0]
+                elif not isinstance(cons, dict):
+                    cons = {}
+                max_elec_pwr = cons.get("maxElectricPower")
+                
+                pwr = None
                 if max_pwr:
-                    return float(max_pwr)
+                    pwr = float(max_pwr)
+                if max_elec_pwr:
+                    elec_pwr = float(max_elec_pwr) / 1000.0
+                    if pwr is not None:
+                        pwr = min(pwr, elec_pwr)
+                    else:
+                        pwr = elec_pwr
+                if pwr is not None:
+                    return pwr
     except Exception:
         pass
     # Fallbacks
     if "CMOD0135" in str(charger_id):
         return 60.0
     if "5001" in str(charger_id):
+        return 3.3
+    if str(charger_id).strip() == "185599798823820":
         return 3.3
     return 7.4
 
@@ -791,7 +809,7 @@ def get_charging_status(charger_id: str):
                 from RemoteStop import get_available_connectors
                 connectors, _ = get_available_connectors(charger_id)
                 chk_statuses = ["Charging", "Preparing"]
-                if str(charger_id).strip() == "185599798823820":
+                if str(charger_id).strip() == "185599798823820" and get_payment_mode() == "dummy":
                     chk_statuses.append("Available")
                 if connectors and any(c.get("status") in chk_statuses for c in connectors):
                     elapsed_seconds = 0
@@ -861,7 +879,7 @@ def get_charging_status(charger_id: str):
             connectors, _ = get_available_connectors(charger_id)
             if connectors:
                 active_statuses = ["Charging", "Preparing", "SuspendedEV", "SuspendedEVSE"]
-                if str(charger_id).strip() == "185599798823820":
+                if str(charger_id).strip() == "185599798823820" and get_payment_mode() == "dummy":
                     active_statuses.append("Available")
                 if not any(c.get("status") in active_statuses for c in connectors):
                     print(f"[status] Active transaction found in scraper, but physical connectors are inactive: {connectors}. Marking active: False.")

@@ -58,8 +58,24 @@ def get_charger_max_power(charger_id: str) -> float:
         if details:
             for evse in details.get("evses", []):
                 max_pwr = evse.get("maxOutputPower")
+                cons = evse.get("connectors", {})
+                if isinstance(cons, list) and len(cons) > 0:
+                    cons = cons[0]
+                elif not isinstance(cons, dict):
+                    cons = {}
+                max_elec_pwr = cons.get("maxElectricPower")
+                
+                pwr = None
                 if max_pwr:
-                    return float(max_pwr)
+                    pwr = float(max_pwr)
+                if max_elec_pwr:
+                    elec_pwr = float(max_elec_pwr) / 1000.0
+                    if pwr is not None:
+                        pwr = min(pwr, elec_pwr)
+                    else:
+                        pwr = elec_pwr
+                if pwr is not None:
+                    return pwr
     except Exception:
         pass
     # Fallbacks
@@ -68,7 +84,7 @@ def get_charger_max_power(charger_id: str) -> float:
     if "5001" in str(charger_id):
         return 3.3
     if str(charger_id).strip() == "185599798823820":
-        return 30.0
+        return 3.3
     return 7.4
 
 def is_charger_dc(charger_id: str) -> bool:
