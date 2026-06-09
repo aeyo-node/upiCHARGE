@@ -278,6 +278,7 @@ def auto_stop_monitoring_loop():
                         
                     # Calculate elapsed seconds from active session timestamp
                     elapsed_seconds = 0
+                    start_dt = None
                     if "timestamp" in session:
                         try:
                             start_dt = datetime.fromisoformat(session["timestamp"].replace("Z", "+00:00"))
@@ -287,9 +288,18 @@ def auto_stop_monitoring_loop():
                             
                     if elapsed_seconds <= 0:
                         continue
+
+                    # CRITICAL: Ignore zombie/stale sessions older than 4 hours.
+                    # These are leftover from previous runs and should not trigger auto-stops.
+                    # A real active session should be cleared from active_payments.json on stop.
+                    MAX_SESSION_SECONDS = 4 * 3600  # 4 hours
+                    if elapsed_seconds > MAX_SESSION_SECONDS:
+                        print(f"[AutoStopMonitor] Skipping stale zombie session for charger {charger_id} (age: {elapsed_seconds}s > {MAX_SESSION_SECONDS}s). Clearing it.")
+                        clear_active_payment(charger_id)
+                        continue
                         
-                    # Generate live telemetry to check running cost
-                    telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit)
+                    # Generate live telemetry to check running cost — pass start_time for accurate solar/non-solar split
+                    telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit, start_time=start_dt)
                     cost_rs = telemetry["cost_rs"]
                     
                     if cost_rs >= prepaid_limit:
@@ -898,13 +908,12 @@ def get_charging_status(charger_id: str):
         dt_start = None
         if start_time_raw:
             try:
-                # e.g., '2026-06-03T12:00:00.000Z'
                 dt_start = datetime.fromisoformat(start_time_raw.replace("Z", "+00:00"))
                 elapsed_seconds = int((datetime.now(timezone.utc) - dt_start).total_seconds())
             except Exception:
                 pass
-                
-        # Look up prepaid limit from active_payments.json to feed telemetry generator
+
+        # Look up prepaid limit from active_payments.json
         prepaid_limit = 200.0
         pay_path = os.path.join(BASE_DIR, "data", "active_payments.json")
         if os.path.exists(pay_path):
@@ -916,43 +925,103 @@ def get_charging_status(charger_id: str):
                     prepaid_limit = float(pay_data[target_key].get("prepaid_amount") or 200.0)
             except Exception:
                 pass
-                
+
+        # Generate simulated telemetry (V/A/W + dead-reckoned energy as fallback)
         telemetry = generate_live_telemetry(charger_id, elapsed_seconds, prepaid_limit, start_time=dt_start)
-        
+
+        # ── Real energy from chargeMOD scraper (PRIMARY source) ──────────────
+        # calculate_detailed_billing reads startValue/stopValue/usedEnergy from active_tx
+        # These are REAL meter readings from the physical charger.
         billing = calculate_detailed_billing(active_tx)
-        
-        # Merge scraped energy/cost with dead-reckon telemetry (pick the maximum to be safe against delays)
         scraped_energy = billing.get("energy_kwh") or 0.0
-        scraped_cost = billing.get("total_amount") or 0.0
-        
-        final_energy = max(scraped_energy, telemetry["energy_kwh"])
-        final_cost = max(scraped_cost, telemetry["cost_rs"])
-        
-        # Update billing fields with our final capped/merged values
-        merged_billing = {
-            **telemetry["billing"],
-            "energy_kwh": round(final_energy, 2),
-            "total_amount": round(final_cost, 2),
-            "energy_usage_fee": round(max(billing.get("energy_usage_fee") or 0.0, telemetry["billing"].get("energy_usage_fee") or 0.0), 2)
-        }
-            
+
+        # ── Try to extract real live V/A/W from active_tx fields ─────────────
+        # chargeMOD includes these in some charger responses
+        real_power_kw = None
+        real_voltage_v = None
+        real_current_a = None
+
+        # Check top-level power/voltage/current fields
+        raw_power   = active_tx.get("power") or active_tx.get("livePower") or active_tx.get("currentPower")
+        raw_voltage = active_tx.get("voltage") or active_tx.get("liveVoltage") or active_tx.get("currentVoltage")
+        raw_current = active_tx.get("current") or active_tx.get("liveCurrent") or active_tx.get("currentCurrent")
+        try:
+            if raw_power is not None:
+                p = float(raw_power)
+                real_power_kw = p / 1000.0 if p > 100 else p
+            if raw_voltage is not None:
+                real_voltage_v = float(raw_voltage)
+            if raw_current is not None:
+                real_current_a = float(raw_current)
+        except (ValueError, TypeError):
+            pass
+
+        # Check nested OCPP meterValues list if present
+        meter_values = active_tx.get("meterValues") or active_tx.get("MeterValues") or []
+        if isinstance(meter_values, list):
+            for mv in reversed(meter_values):  # most recent last → iterate reversed
+                if not isinstance(mv, dict):
+                    continue
+                sampled = mv.get("sampledValue") or mv.get("SampledValue") or []
+                if not isinstance(sampled, list):
+                    continue
+                for sv in sampled:
+                    measurand = str(sv.get("measurand") or sv.get("Measurand") or "").lower()
+                    val = sv.get("value") or sv.get("Value")
+                    if val is None:
+                        continue
+                    try:
+                        val_f = float(val)
+                        if "power" in measurand and real_power_kw is None:
+                            real_power_kw = val_f / 1000.0 if val_f > 100 else val_f
+                        elif "voltage" in measurand and real_voltage_v is None:
+                            real_voltage_v = val_f
+                        elif "current" in measurand and real_current_a is None:
+                            real_current_a = val_f
+                    except (ValueError, TypeError):
+                        pass
+
+        print(f"[status] charger={charger_id} scraped_energy={scraped_energy:.4f}kWh sim_energy={telemetry['energy_kwh']:.4f}kWh real_V={real_voltage_v} real_A={real_current_a} real_kW={real_power_kw}")
+
+        # ── Merge: prefer real scraped energy, fall back to dead-reckoning ────
+        if scraped_energy > 0.001:
+            # REAL energy from meter — recalculate cost with actual kWh
+            final_energy = scraped_energy
+            from RemoteStop import calculate_custom_tariff
+            end_time_now = datetime.now(timezone.utc)
+            real_billing = calculate_custom_tariff(charger_id, dt_start or end_time_now, end_time_now, final_energy)
+            final_cost = min(real_billing["total_amount"], prepaid_limit)
+            merged_billing = {**real_billing, "energy_kwh": round(final_energy, 2), "total_amount": round(final_cost, 2)}
+            print(f"[status] → REAL energy: {final_energy:.3f} kWh = Rs.{final_cost:.2f}")
+        else:
+            # No real energy yet (session just started, meter hasn't synced)
+            final_energy = telemetry["energy_kwh"]
+            final_cost   = telemetry["cost_rs"]
+            merged_billing = {**telemetry["billing"], "energy_kwh": round(final_energy, 2), "total_amount": round(final_cost, 2)}
+            print(f"[status] → Dead-reckoned energy (no real meter data yet): {final_energy:.3f} kWh")
+
+        # ── V/A/W: real charger values if available, else simulated ──────────
+        final_power_kw  = real_power_kw  if real_power_kw  is not None else telemetry["power_kw"]
+        final_voltage_v = real_voltage_v if real_voltage_v is not None else telemetry["voltage_v"]
+        final_current_a = real_current_a if real_current_a is not None else telemetry["current_a"]
+
         return {
             "active": True,
             "transaction_id": active_tx.get("transactionId") or active_tx.get("_id"),
-            "user_mobile": active_tx.get("userMobile"),
-            "user_name": active_tx.get("userName"),
-            "energy_kwh": round(final_energy, 2),
-            "cost_rs": round(final_cost, 2),
+            "user_mobile":    active_tx.get("userMobile"),
+            "user_name":      active_tx.get("userName"),
+            "energy_kwh":     round(final_energy, 2),
+            "cost_rs":        round(final_cost, 2),
             "elapsed_seconds": elapsed_seconds,
-            "start_time": start_time_raw,
-            "billing": merged_billing,
-            "charger_name": active_tx.get("chargerName") or (active_tx.get("chargerDetails", {}).get("name") if active_tx.get("chargerDetails") else charger_id),
-            "location_name": active_tx.get("locationName") or "OCPI Test Location - PROD",
-            "vehicle_model": active_tx.get("vehicleModel", "--"),
-            "stop_reason": active_tx.get("stopReason", "Stopped Remotely"),
-            "power_kw": telemetry["power_kw"],
-            "voltage_v": telemetry["voltage_v"],
-            "current_a": telemetry["current_a"]
+            "start_time":     start_time_raw,
+            "billing":        merged_billing,
+            "charger_name":   active_tx.get("chargerName") or (active_tx.get("chargerDetails", {}).get("name") if active_tx.get("chargerDetails") else charger_id),
+            "location_name":  active_tx.get("locationName") or "OCPI Test Location - PROD",
+            "vehicle_model":  active_tx.get("vehicleModel", "--"),
+            "stop_reason":    active_tx.get("stopReason", "Stopped Remotely"),
+            "power_kw":   round(final_power_kw, 2),
+            "voltage_v":  round(final_voltage_v, 1),
+            "current_a":  round(final_current_a, 1)
         }
         
     except Exception as e:
