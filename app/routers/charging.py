@@ -720,7 +720,7 @@ def get_charging_status(charger_id: str):
     """
     # 0. Check for active simulation session
     sim_path = os.path.join(BASE_DIR, "data", "active_simulation_session.json")
-    if get_payment_mode() == "dummy" and os.path.exists(sim_path):
+    if os.path.exists(sim_path):
         try:
             import json
             with open(sim_path, "r") as f:
@@ -819,7 +819,7 @@ def get_charging_status(charger_id: str):
                 from RemoteStop import get_available_connectors
                 connectors, _ = get_available_connectors(charger_id)
                 chk_statuses = ["Charging", "Preparing"]
-                if str(charger_id).strip() == "185599798823820" and get_payment_mode() == "dummy":
+                if str(charger_id).strip() == "185599798823820":
                     chk_statuses.append("Available")
                 if connectors and any(c.get("status") in chk_statuses for c in connectors):
                     elapsed_seconds = 0
@@ -889,7 +889,7 @@ def get_charging_status(charger_id: str):
             connectors, _ = get_available_connectors(charger_id)
             if connectors:
                 active_statuses = ["Charging", "Preparing", "SuspendedEV", "SuspendedEVSE"]
-                if str(charger_id).strip() == "185599798823820" and get_payment_mode() == "dummy":
+                if str(charger_id).strip() == "185599798823820":
                     active_statuses.append("Available")
                 if not any(c.get("status") in active_statuses for c in connectors):
                     print(f"[status] Active transaction found in scraper, but physical connectors are inactive: {connectors}. Marking active: False.")
@@ -1033,7 +1033,7 @@ def stop_charging(req: StopChargingRequest):
     """
     # 0. Intercept active simulation session stopping
     sim_path = os.path.join(BASE_DIR, "data", "active_simulation_session.json")
-    if get_payment_mode() == "dummy" and os.path.exists(sim_path):
+    if os.path.exists(sim_path):
         try:
             import json
             with open(sim_path, "r") as f:
