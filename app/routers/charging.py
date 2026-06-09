@@ -2,6 +2,7 @@ import sys
 import os
 import requests
 import json
+import threading
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -59,19 +60,27 @@ def get_active_payment(charger_id: str) -> dict:
 def clear_active_payment(charger_id: str):
     """
     Deletes the active payment mapping for a charger from data/active_payments.json.
+    Thread-safe: uses a local lock to prevent concurrent reads/writes.
     """
     try:
         import json
         filepath = os.path.join(BASE_DIR, "data", "active_payments.json")
-        if os.path.exists(filepath):
-            with open(filepath, "r") as f:
-                data = json.load(f)
-            key = str(charger_id).strip()
-            if key in data:
-                del data[key]
-                with open(filepath, "w") as f:
-                    json.dump(data, f, indent=2)
-                print(f"[Charging Router Helper] Cleared payment mapping for charger {charger_id}")
+        # Re-use the lock from payments module if available, else use a local one
+        try:
+            from app.routers.payments import _payments_file_lock as _lock
+        except ImportError:
+            _lock = threading.Lock()
+
+        with _lock:
+            if os.path.exists(filepath):
+                with open(filepath, "r") as f:
+                    data = json.load(f)
+                key = str(charger_id).strip()
+                if key in data:
+                    del data[key]
+                    with open(filepath, "w") as f:
+                        json.dump(data, f, indent=2)
+                    print(f"[Charging Router Helper] Cleared payment mapping for charger {charger_id}")
     except Exception as e:
         print(f"[Charging Router Helper] Error clearing payment mapping: {e}")
 

@@ -1,6 +1,7 @@
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.config import HOST, PORT, PAYMENT_MODE
 from app.routers import charging, payments, admin, support
 
@@ -10,12 +11,23 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS Middleware setup
+# CORS Middleware — restricted to known origins only
+# Razorpay webhook is excluded from CORS (it comes from Razorpay servers, not a browser)
+ALLOWED_ORIGINS = [
+    "https://upicharge.com",
+    "https://www.upicharge.com",
+    "https://app.upicharge.com",
+    "http://localhost:3000",   # Local frontend dev
+    "http://localhost:5500",   # Live Server (VS Code)
+    "http://127.0.0.1:5500",
+    "http://localhost:8080",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict this to your Next.js frontend URL
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 

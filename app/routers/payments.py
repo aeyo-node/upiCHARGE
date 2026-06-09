@@ -1,11 +1,16 @@
 import os
 import sys
 import json
+import threading
 import requests
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException, Header
 from pydantic import BaseModel
 import razorpay
+
+# Module-level lock to prevent race conditions on shared JSON files
+# (Razorpay retries webhooks; AutoStopMonitor runs every 5s in background thread)
+_payments_file_lock = threading.Lock()
 
 # Ensure api-call directory is on the path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -133,32 +138,35 @@ def save_active_payment(charger_id: str, payment_id: str, amount: float, custome
     Saves an active payment record in data/active_payments.json
     keyed by the charger_id so that we can look up the payment_id for refunds on stop.
     Includes the connector_id and optional transaction_id from QR APIs.
+    Thread-safe: uses _payments_file_lock to prevent race conditions.
     """
     try:
         data_dir = os.path.join(BASE_DIR, "data")
         os.makedirs(data_dir, exist_ok=True)
         filepath = os.path.join(data_dir, "active_payments.json")
-        
-        data = {}
-        if os.path.exists(filepath):
-            with open(filepath, "r") as f:
-                try:
-                    data = json.load(f)
-                except Exception:
-                    data = {}
-        
-        # Save keyed by charger_id
-        data[str(charger_id).strip()] = {
-            "payment_id": payment_id,
-            "prepaid_amount": amount,
-            "customer_mobile": customer_mobile,
-            "connector_id": connector_id,
-            "transaction_id": transaction_id,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-        
-        with open(filepath, "w") as f:
-            json.dump(data, f, indent=2)
+
+        with _payments_file_lock:
+            data = {}
+            if os.path.exists(filepath):
+                with open(filepath, "r") as f:
+                    try:
+                        data = json.load(f)
+                    except Exception:
+                        data = {}
+
+            # Save keyed by charger_id
+            data[str(charger_id).strip()] = {
+                "payment_id": payment_id,
+                "prepaid_amount": amount,
+                "customer_mobile": customer_mobile,
+                "connector_id": connector_id,
+                "transaction_id": transaction_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+            with open(filepath, "w") as f:
+                json.dump(data, f, indent=2)
+
         print(f"[Webhook Store] Recorded mapping: charger {charger_id} -> payment {payment_id} (₹{amount}, connector {connector_id}, tx {transaction_id})")
     except Exception as e:
         print(f"[Webhook Store] Error saving mapping: {e}")
@@ -489,19 +497,37 @@ async def razorpay_webhook(
     # 4. Handle Payment Captured Event
     if event_type == "payment.captured":
         payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
-        
+
         payment_id = payment_entity.get("id")
         order_id = payment_entity.get("order_id")
         amount_paise = payment_entity.get("amount", 0)
         prepaid_amount = float(amount_paise) / 100.0
-        
+
+        # ── IDEMPOTENCY GUARD ──────────────────────────────────────────────────
+        # Razorpay retries webhooks up to 3× on non-200 responses.
+        # If this payment was already processed, return 200 immediately.
+        if payment_id:
+            try:
+                data_dir = os.path.join(BASE_DIR, "data")
+                tx_path = os.path.join(data_dir, "transactions_db.json")
+                if os.path.exists(tx_path):
+                    with open(tx_path, "r", encoding="utf-8") as _f:
+                        _db = json.load(_f)
+                    for _tx in _db:
+                        if _tx.get("payment_id") == payment_id and _tx.get("status") == "captured":
+                            print(f"[Webhook Idempotency] payment_id={payment_id} already captured & processed. Skipping duplicate.")
+                            return {"status": "already_processed", "payment_id": payment_id}
+            except Exception as _idem_err:
+                print(f"[Webhook Idempotency] Could not check idempotency: {_idem_err} — continuing")
+        # ──────────────────────────────────────────────────────────────────────
+
         notes = payment_entity.get("notes", {}) or {}
-        
+
         # Extract metadata passed by frontend during checkout notes
         charger_id = notes.get("charger_id") or notes.get("chargerId")
         connector_id_raw = notes.get("connector_id") or notes.get("connectorId")
         customer_mobile_raw = notes.get("customer_mobile") or notes.get("phone") or payment_entity.get("contact")
-        
+
         # FALLBACK: If notes are stripped or charger_id is missing, search local transactions_db.json using order_id
         if not charger_id and order_id:
             print(f"[Webhook Process Warning] Notes/charger_id missing in webhook payload! Querying transactions_db.json for order_id: {order_id}")
